@@ -7,11 +7,13 @@ bl_info = {
     'description': '(in development)'
 }
 
-import bpy, imp
-from . import pointcloud
-
-# For development: reload our other modules when this one is reloaded.
-imp.reload(pointcloud)
+# Load/reload the entire package.
+is_reloading = ("bpy" in locals())
+import bpy, importlib
+if is_reloading:
+    importlib.reload(pointcloud)
+else:
+    from . import pointcloud
 
 class ObjectCreatePointcloudOperator(bpy.types.Operator):
     bl_idname = "dev.create_pointcloud"
