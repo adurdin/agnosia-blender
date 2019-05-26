@@ -11,25 +11,32 @@ def create_mesh_obj(name, vertices, normals):
     o.show_name = True
     bpy.context.scene.collection.objects.link(o)
     mesh.from_pydata(vertices, [], [])
-    mesh.calc_normals()
-    # This is supposed to set normals, but I can't get it to work.
-    # mesh.normals_split_custom_set_from_vertices(normals)
+    # This is supposed to set normals, but I can't get it to work:
+    # blender won't show them in edit mode, nor will it export them.
+    # Seems like per-vertex normals only actually work if you have edges/faces?
+    mesh.normals_split_custom_set_from_vertices(normals)
     mesh.validate(verbose=True, clean_customdata=False)
     mesh.update()
     return o
 
-def calculate_radius(o):
+def object_bounding_radius(o):
     from math import sqrt
     radius = 0.0
     for (x, y, z) in o.bound_box:
         radius = max(radius, sqrt(x*x + y*y + z*z))
     return radius
 
-def sphere_surface_points(radius, count, rng=random):
-    # Yield an iterable of Vector randomly distributed
-    # on the surface of a sphere with the given radius.
-    from math import acos, cos, pi, sin, sqrt
-    for i in range(count):
+def object_bounding_halfwidth(o):
+    halfwidth = 0.0
+    for (x, y, z) in o.bound_box:
+        halfwidth = max(halfwidth, abs(x), abs(y), abs(z))
+    return halfwidth
+
+def sphere_surface_points(radius, rng=random):
+    # Generate Vectors randomly distributed on the surface of
+    # a sphere with the given radius.
+    while True:
+        from math import acos, cos, pi, sin, sqrt
         u = rng.random()
         v = rng.random()
         theta = 2 * pi * u
@@ -39,13 +46,13 @@ def sphere_surface_points(radius, count, rng=random):
         z = radius * cos(phi)
         yield Vector((x, y, z))
 
-def cube_volume_points(halfwidth, count, rng=random):
-    # Yield an iterable of Vector randomly distributed
-    # within the volume of a cube with the given halfwidth.
-    for i in range(count):
-        u = rng.random()
-        v = rng.random()
-        w = rng.random()
+def cube_volume_points(halfwidth, rng=random):
+    # Generate Vectors randomly distributed within the volume
+    # of a cube with the given halfwidth.
+    while True:
+        u = rng.uniform(-1, 1)
+        v = rng.uniform(-1, 1)
+        w = rng.uniform(-1, 1)
         x = halfwidth * u
         y = halfwidth * v
         z = halfwidth * w
@@ -58,21 +65,46 @@ def raycast_to_origin(o, pt):
     direction = (origin - pt).normalized()
     return o.ray_cast(pt, direction)
 
+def sphere_sample_obj(o, count):
+    # Sample the object by raycasting from a sphere surrounding it
+    # towards the origin.
+    vertices = []
+    normals = []
+    radius = object_bounding_radius(o) + 0.1
+    it = iter(sphere_surface_points(radius))
+    while len(vertices) < count:
+        pt = next(it)
+        result, position, normal, index = raycast_to_origin(o, pt)
+        if result:
+            vertices.append(position)
+            normals.append(normal)
+    return (vertices, normals)
+
+def volume_sample_obj(o, count):
+    # Sample the object by generating points within its bounds and
+    # testing if they're inside it.
+    vertices = []
+    normals = []
+    halfwidth = object_bounding_halfwidth(o) + 0.1
+    it = iter(cube_volume_points(halfwidth))
+    while len(vertices) < count:
+        pt = next(it)
+        # FIXME: need to check if this point is inside the object or outside.
+        # Thinking can raycast from pt in the direction of (pt - origin) and
+        # a large distance, and see if we only cross outward-facing faces...
+        # But object raycast only returns the first hit... don't even know if
+        # that includes outward-facing faces.
+        vertices.append(pt)
+        normals.append(Vector((1, 0, 0)))
+    return (vertices, normals)
+
 def create_pointcloud_from_active_object():
     o = bpy.context.active_object
     if not o: raise Exception("No object selected")
 
     count = 5000
-    vertices = []
-    normals = []
-
-    # Sample the object spherically, uniformly.
-    radius = calculate_radius(o) + 1.0
-    for pt in sphere_surface_points(radius, count):
-        result, position, normal, index = raycast_to_origin(o, pt)
-        if result:
-            vertices.append(position)
-            normals.append(normal)
+    (vertices, normals) = sphere_sample_obj(o, count)
+    # (vertices, normals) = volume_sample_obj(o, count)
 
     cloud = create_mesh_obj(o.name + '_cloud', vertices, normals)
     cloud.select_set(True)
