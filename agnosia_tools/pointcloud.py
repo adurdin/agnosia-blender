@@ -4,7 +4,8 @@ import math
 import mathutils
 import random
 
-from bpy.types import Operator, PropertyGroup
+from bpy.props import IntProperty, PointerProperty
+from bpy.types import Object, Operator, Panel, PropertyGroup
 from mathutils import Vector
 
 
@@ -22,6 +23,52 @@ class AgnosiaCreatePointcloudOperator(Operator):
 
 
 #---------------------------------------------------------------------------#
+# Panels
+
+class AGNOSIA_PT_pointcloud(Panel):
+    bl_label = "Pointcloud"
+    bl_idname = "AGNOSIA_PT_pointcloud"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Agnosia"
+    bl_context = "objectmode"
+
+    @classmethod
+    def poll(self, context):
+        o = context.active_object
+        if o is None: return False
+        if not o.select_get(): return False
+        if not o.pointclouds: return False
+        return True
+
+    def draw(self, context):
+        o = context.active_object
+        pc = o.pointclouds[0]
+
+        layout = self.layout
+        row = layout.row(align=True)
+        box = row.box()
+        box.label(text="There is nothing here that you recognise. Yet.");
+        box = layout.box()
+        box.prop(pc, 'obj_to_sample')
+        box.prop(pc, 'point_count')
+
+
+#---------------------------------------------------------------------------#
+# Properties
+
+def update(self, context):
+    self.update(context)
+
+class PointcloudProperty(PropertyGroup):
+    obj_to_sample : PointerProperty(name="Sample", type=Object, update=update)
+    point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=update)
+
+    def update(self, context):
+        print("PointcloudProperty.update()")
+
+
+#---------------------------------------------------------------------------#
 # Core
 
 def create_mesh_obj(name, vertices, normals):
@@ -36,6 +83,8 @@ def create_mesh_obj(name, vertices, normals):
     mesh.normals_split_custom_set_from_vertices(normals)
     mesh.validate(verbose=True, clean_customdata=False)
     mesh.update()
+    # Add the properties
+    o.pointclouds.add()
     return o
 
 def object_bounding_radius(o):
@@ -126,6 +175,8 @@ def create_pointcloud_from_active_object():
     # (vertices, normals) = volume_sample_obj(o, count)
 
     cloud = create_mesh_obj(o.name + '_cloud', vertices, normals)
+    # Make it active, and select it
+    bpy.context.view_layer.objects.active = cloud
     cloud.select_set(True)
     o.hide_set(True)
     print(f"Created: {cloud}")

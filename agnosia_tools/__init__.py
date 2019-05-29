@@ -17,7 +17,10 @@ else:
 
 
 import bpy
-from bpy.types import Panel
+from bpy.props import CollectionProperty
+from bpy.types import Object, Panel, PropertyGroup
+
+from .pointcloud import PointcloudProperty
 
 
 #---------------------------------------------------------------------------#
@@ -45,28 +48,6 @@ class TOOLS_PT_agnosia_create(Panel):
         row.operator("object.create_pointcloud", text="Pointcloud")
 
 
-class AGNOSIA_PT_pointcloud(Panel):
-    bl_label = "Pointcloud"
-    bl_idname = "AGNOSIA_PT_pointcloud"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Agnosia"
-    bl_context = "objectmode"
-
-    @classmethod
-    def poll(self, context):
-        # This panel should only be available when the selected object
-        # is a pointcloud.
-        # FIXME: but for now it's always available!!
-        return True
-
-    def draw(self, context):
-        layout = self.layout
-        row = layout.row(align=True)
-        box = row.box()
-        box.label(text="There is nothing here that you recognise. Yet.");
-
-
 #---------------------------------------------------------------------------#
 # Menus
 
@@ -80,24 +61,41 @@ def menu_create_pointcloud(self, context):
 def register():
     # Add operators
     bpy.utils.register_class(pointcloud.AgnosiaCreatePointcloudOperator)
+
     # Add panels
     bpy.utils.register_class(TOOLS_PT_agnosia_create)
-    bpy.utils.register_class(AGNOSIA_PT_pointcloud)
+    bpy.utils.register_class(pointcloud.AGNOSIA_PT_pointcloud)
+
     # Add menus
     # FIXME: this shouldn't just be slapped on the end of the menu like this!
     # Probably we should do an Add Object menu, and have this just be a convenience
     # to add a pointcloud + link it to the selected object for sampling.
     bpy.types.VIEW3D_MT_object.append(menu_create_pointcloud)
+
+    # Add property groups
+    bpy.utils.register_class(pointcloud.PointcloudProperty)
+
+    # FIXME: should maybe be on Mesh, since I can't sample cameras and shit.
+    Object.pointclouds = CollectionProperty(type=pointcloud.PointcloudProperty)
+
     # Done.
     print("agnosia_tools: registered.");
 
+
 def unregister():
+    # Remove property groups
+    del Object.pointclouds
+    bpy.utils.unregister_class(pointcloud.PointcloudProperty)
+
     # Remove menus
     bpy.types.VIEW3D_MT_object.remove(menu_create_pointcloud)
+
     # Remove panels
-    bpy.utils.unregister_class(AGNOSIA_PT_pointcloud)
+    bpy.utils.unregister_class(pointcloud.AGNOSIA_PT_pointcloud)
     bpy.utils.unregister_class(TOOLS_PT_agnosia_create)
+
     # Remove operators
     bpy.utils.unregister_class(pointcloud.AgnosiaCreatePointcloudOperator)
+
     # Done
     print("agnosia_tools: unregistered.");
