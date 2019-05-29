@@ -18,7 +18,28 @@ class AgnosiaCreatePointcloudOperator(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        create_pointcloud_from_active_object()
+        if bpy.context.mode != "OBJECT":
+            self.report({'WARNING'}, "Create pointcloud: must be in Object mode.")
+            return {'CANCELLED'}
+        target = bpy.context.object
+        if (target is None) or (target.type != 'MESH'):
+            self.report({'WARNING'}, "Create pointcloud: must select a Mesh object.")
+            return {'CANCELLED'}
+        if target.pointclouds:
+            self.report({'WARNING'}, "Create pointcloud: can't create a pointcloud from a pointcloud.")
+            return {'CANCELLED'}
+
+        # Create a pointcloud.
+        o = create_pointcloud_from(target)
+
+        # Make the pointcloud active, and select it.
+        bpy.context.view_layer.objects.active = o
+        o.select_set(True)
+
+        # Deselect and hide the sampled object.
+        target.select_set(False)
+        target.hide_set(True)
+
         return {'FINISHED'}
 
 
@@ -35,14 +56,14 @@ class AGNOSIA_PT_pointcloud(Panel):
 
     @classmethod
     def poll(self, context):
-        o = context.active_object
+        o = context.object
         if o is None: return False
         if not o.select_get(): return False
         if not o.pointclouds: return False
         return True
 
     def draw(self, context):
-        o = context.active_object
+        o = context.object
         pc = o.pointclouds[0]
 
         layout = self.layout
@@ -65,17 +86,30 @@ class PointcloudProperty(PropertyGroup):
     point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=update)
 
     def update(self, context):
-        print("PointcloudProperty.update()")
+        o_cloud = context.object
+        update_pointcloud(o_cloud)
 
 
 #---------------------------------------------------------------------------#
 # Core
 
-def create_mesh_obj(name, vertices, normals):
+def create_pointcloud_from(target=None):
+    o = create_empty_mesh_obj(bpy.context, 'Pointcloud')
+    o.pointclouds[0].obj_to_sample = target
+    update_pointcloud(o)
+    return o
+
+def create_empty_mesh_obj(context, name):
     mesh = bpy.data.meshes.new(name + 'Mesh')
     o = bpy.data.objects.new(name, mesh)
     o.show_name = True
-    bpy.context.scene.collection.objects.link(o)
+    context.scene.collection.objects.link(o)
+    o.pointclouds.add()
+    return o
+
+def create_pointcloud_mesh(name, sampler, count, target):
+    mesh = bpy.data.meshes.new(name)
+    (vertices, normals) = sampler(target, count)
     mesh.from_pydata(vertices, [], [])
     # This is supposed to set normals, but I can't get it to work:
     # blender won't show them in edit mode, nor will it export them.
@@ -83,8 +117,14 @@ def create_mesh_obj(name, vertices, normals):
     mesh.normals_split_custom_set_from_vertices(normals)
     mesh.validate(verbose=True, clean_customdata=False)
     mesh.update()
-    # Add the properties
-    o.pointclouds.add()
+    return mesh
+
+def update_pointcloud(o):
+    pc = o.pointclouds[0]
+    target = pc.obj_to_sample
+    if not target:
+        return False
+    o.data = create_pointcloud_mesh(o.data.name, sphere_sample_obj, pc.point_count, target)
     return o
 
 def object_bounding_radius(o):
@@ -165,18 +205,3 @@ def volume_sample_obj(o, count):
         vertices.append(pt)
         normals.append(Vector((1, 0, 0)))
     return (vertices, normals)
-
-def create_pointcloud_from_active_object():
-    o = bpy.context.active_object
-    if not o: raise Exception("No object selected")
-
-    count = 5000
-    (vertices, normals) = sphere_sample_obj(o, count)
-    # (vertices, normals) = volume_sample_obj(o, count)
-
-    cloud = create_mesh_obj(o.name + '_cloud', vertices, normals)
-    # Make it active, and select it
-    bpy.context.view_layer.objects.active = cloud
-    cloud.select_set(True)
-    o.hide_set(True)
-    print(f"Created: {cloud}")
