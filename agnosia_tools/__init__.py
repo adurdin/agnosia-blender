@@ -42,7 +42,8 @@ class TOOLS_PT_agnosia_create(Panel):
         box = row.box()
         box.label(text="Create")
         row = box.row(align=True)
-        row.operator("agnosia.create_pointcloud", text="Pointcloud")
+        row.operator("object.create_pointcloud", text="Pointcloud")
+
 
 class AGNOSIA_PT_pointcloud(Panel):
     bl_label = "Pointcloud"
@@ -67,24 +68,10 @@ class AGNOSIA_PT_pointcloud(Panel):
 
 
 #---------------------------------------------------------------------------#
-# Operators
-
-# FIXME: move this to pointcloud.py? Just leave UI here.
-class ObjectCreatePointcloudOperator(bpy.types.Operator):
-    bl_idname = "agnosia.create_pointcloud"
-    bl_label = "Create pointcloud"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        pointcloud.create_pointcloud_from_active_object()
-        return {'FINISHED'}
-
-
-#---------------------------------------------------------------------------#
 # Menus
 
 def menu_create_pointcloud(self, context):
-    self.layout.operator(ObjectCreatePointcloudOperator.bl_idname)
+    self.layout.operator(pointcloud.AgnosiaCreatePointcloudOperator.bl_idname)
 
 
 #---------------------------------------------------------------------------#
@@ -92,7 +79,7 @@ def menu_create_pointcloud(self, context):
 
 def register():
     # Add operators
-    bpy.utils.register_class(ObjectCreatePointcloudOperator)
+    bpy.utils.register_class(pointcloud.AgnosiaCreatePointcloudOperator)
     # Add panels
     bpy.utils.register_class(TOOLS_PT_agnosia_create)
     bpy.utils.register_class(AGNOSIA_PT_pointcloud)
@@ -111,6 +98,6 @@ def unregister():
     bpy.utils.unregister_class(AGNOSIA_PT_pointcloud)
     bpy.utils.unregister_class(TOOLS_PT_agnosia_create)
     # Remove operators
-    bpy.utils.unregister_class(ObjectCreatePointcloudOperator)
+    bpy.utils.unregister_class(pointcloud.AgnosiaCreatePointcloudOperator)
     # Done
     print("agnosia_tools: unregistered.");

@@ -3,7 +3,26 @@ import bmesh
 import math
 import mathutils
 import random
+
+from bpy.types import Operator, PropertyGroup
 from mathutils import Vector
+
+
+#---------------------------------------------------------------------------#
+# Operators
+
+class AgnosiaCreatePointcloudOperator(Operator):
+    bl_idname = "object.create_pointcloud"
+    bl_label = "Create pointcloud"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        create_pointcloud_from_active_object()
+        return {'FINISHED'}
+
+
+#---------------------------------------------------------------------------#
+# Core
 
 def create_mesh_obj(name, vertices, normals):
     mesh = bpy.data.meshes.new(name + 'Mesh')
