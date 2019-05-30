@@ -263,7 +263,7 @@ def create_pointcloud_mesh(context, name, sampler, count, target):
 def update_pointcloud(context, o):
     pc = o.pointclouds[0]
     target = pc.obj_to_sample
-    if not target:
+    if (target is None) or (target.type != 'MESH') or (target.pointclouds):
         return False
     def sampler(count):
         # return sphere_sample_obj(target, count)
