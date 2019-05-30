@@ -94,7 +94,131 @@ class PointcloudProperty(PropertyGroup):
 #---------------------------------------------------------------------------#
 # Core
 
-def create_pointcloud_from(context, target=None):
+UNPACK_NORMALS_SCRIPT = """\
+    shader unpack_normals(
+        vector PackedNormal = vector(0, 0, 0),
+        output vector Normal = vector(0, 0, 0))
+    {
+        vector v = PackedNormal.xyz;
+        v -= vector(0.5, 0.5, 0.5);
+        v *= 2.0;
+        Normal = v;
+    }
+"""
+
+def layout_nodes(node_tree, root_node):
+    """Make all the nodes in node_tree, starting from root_node, nice and tidy."""
+    from collections import defaultdict
+    from math import ceil
+
+    # Lookup table of nodes to their incoming links
+    incoming = defaultdict(list)
+    for l in node_tree.links:
+        incoming[l.to_node].append(l)
+
+    # Lookup table of nodes to their sort keys
+    sort_keys = {}
+    sort_keys[root_node] = ('_root',)
+
+    all_columns = [[root_node]]
+    links = list(incoming[root_node])
+
+    # Arrange all the nodes from the root nodes into columns,
+    # with each column's nodes in order by the outputs and nodes they feed into.
+    while links:
+        # Drop all the nodes on all the links into this column
+        column = []
+        for l in links:
+            # k = ((l.to_socket.name, l.from_socket.name), ) + sort_keys[l.to_node]
+            k = (l.to_socket.name, ) + sort_keys[l.to_node]
+            other_k = sort_keys.get(l.from_node, None)
+            if other_k is not None:
+                k = max(k, other_k)
+            sort_keys[l.from_node] = k
+            if l.from_node not in column:
+                column.append(l.from_node)
+        column.sort(key=sort_keys.get)
+        all_columns.append(column)
+        # Get the next set of links to sort
+        links = []
+        for n in column:
+            links.extend(incoming[n])
+
+    # Now lay out all the nodes right-to-left, with each column vertically
+    # centered with respect to all the other columns.
+    grid_size = 20.0
+    title_height = grid_size
+    column_location = Vector((0.0, 0.0)) # x: right edge, y: center.
+    spacing = Vector((4.0, 2.0)) * grid_size
+    for i, column in enumerate(all_columns):
+        # Calculate the total size
+        total_node_width = max(ceil(n.width) for n in column)
+        total_node_height = sum(ceil(n.height + title_height) for n in column)
+        padding = spacing[1] * (len(column) - 1)
+        column_width = ceil(total_node_width / grid_size) * grid_size
+        column_height = total_node_height + padding
+        # Lay out these nodes vertically down the column.
+        x = column_location[0] - (column_width / 2.0)
+        y = column_location[1] + (column_height / 2.0)
+        for n in column:
+            node_x = round(x - n.width / 2.0)
+            node_y = round(y - (n.height + title_height) / 2.0)
+            n.location = Vector((node_x, node_y))
+            y -= (ceil(n.height + title_height + spacing[1]))
+        column_location[0] -= (column_width + spacing[0])
+
+def define_pointcloud_material(material):
+    material.use_nodes = True
+
+    tree = material.node_tree
+    nodes = tree.nodes
+    links = tree.links
+
+    nodes.clear()
+
+    output = nodes.new(type='ShaderNodeOutputMaterial')
+    # output.location = self._grid_location(6, 4)
+
+    diffuse = nodes.new(type='ShaderNodeBsdfDiffuse')
+    diffuse.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)
+    diffuse.inputs['Roughness'].default_value = 0.5
+    links.new(diffuse.outputs['BSDF'], output.inputs['Surface'])
+
+    colors = nodes.new(type='ShaderNodeAttribute')
+    colors.attribute_name = 'PointColor'
+    links.new(colors.outputs['Color'], diffuse.inputs['Color'])
+
+    text = bpy.data.texts.new(name='UnpackNormalsNode')
+    text.from_string(UNPACK_NORMALS_SCRIPT)
+    unpack_normals = nodes.new(type='ShaderNodeScript')
+    unpack_normals.label = "Unpack Normals"
+    unpack_normals.mode = 'INTERNAL'
+    unpack_normals.script = text
+    unpack_normals.inputs.new(name='Packed Normal', type='NodeSocketVectorXYZ')
+    unpack_normals.outputs.new(name='Normal', type='NodeSocketVectorXYZ')
+    links.new(unpack_normals.outputs['Normal'], diffuse.inputs['Normal'])
+
+    normals = nodes.new(type='ShaderNodeAttribute')
+    normals.attribute_name = 'PointNormal'
+    links.new(normals.outputs['Vector'], unpack_normals.inputs['Packed Normal'])
+
+    layout_nodes(tree, output)
+
+def get_pointcloud_material():
+    name = 'PointcloudMaterial'
+    m = bpy.data.materials.get(name)
+    if not m:
+        m = bpy.data.materials.new(name)
+        define_pointcloud_material(m);
+    return m
+
+def assign_material(o, mat):
+    if (o.data.materials):
+        o.data.materials[0] = mat
+    else:
+        o.data.materials.append(mat)
+
+def create_pointcloud_from(context, target):
     o = create_empty_mesh_obj(context, 'Pointcloud')
     o.pointclouds[0].obj_to_sample = target
     update_pointcloud(context, o)
@@ -116,10 +240,6 @@ def create_pointcloud_mesh(context, name, sampler, count, target):
         (vertices, faces, normals, colors) = \
             expand_vertex_data_to_mesh(vertices, normals, colors)
         mesh.from_pydata(vertices, [], faces)
-        # # This is supposed to set normals, but I can't get it to work:
-        # # blender won't show them in edit mode, nor will it export them.
-        # # Seems like per-vertex normals only actually work if you have edges/faces?
-        # mesh.normals_split_custom_set_from_vertices(normals)
         mesh.validate(verbose=True, clean_customdata=False)
         mesh.update()
         # Apply per-vertex colors and normals
@@ -142,6 +262,7 @@ def update_pointcloud(context, o):
         # return sphere_sample_obj(target, count)
         return volume_sample_obj(context, target, count)
     o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
+    assign_material(o, get_pointcloud_material())
     return o
 
 def expand_vertex_data_to_mesh(vertices, normals, colors):
