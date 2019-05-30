@@ -433,12 +433,14 @@ def raycast_to_exterior(bvh, pt, direction):
     return false positives. Do two different raycasts in two perpendicular
     directions if you need more certainty."""
 
-    origin = Vector((0, 0, 0))
-    from_origin = (pt - origin)
+    NO_HIT = (None, None, None, None)
+
     # If the point's too close to the origin, we can't get a proper direction,
     # so just skip it.
+    origin = Vector((0, 0, 0))
+    from_origin = (pt - origin)
     if (from_origin.length < 0.0001):
-        return (None, None, None, None)
+        return NO_HIT
 
     ray_origin = pt
     direction = from_origin.normalized()
@@ -446,35 +448,18 @@ def raycast_to_exterior(bvh, pt, direction):
     # Raycast from the point towards the exterior, iterating
     # until we don't hit any faces.
     tiny_step = (direction * 0.0001)
-    previous_index = -1
     first_outward = None
     outward_crossings = 0
-    while True:
-        (location, normal, index, distance) = bvh.ray_cast(ray_origin, direction)
-        if location is None:
-            # Didn't hit anything, so we're done.
-            break
 
-        # Sanity check that we're not hitting the same face again due to rounding error!
-        if index == previous_index:
-            ray_origin = location + tiny_step
-            continue
-        previous_index = index
+    (location, normal, index, distance) = bvh.ray_cast(ray_origin, direction)
+    if location is None:
+        # Didn't hit anything, so we're done.
+        return NO_HIT
 
-        # Check if the face is oriented towards the ray or away from it.
-        inward_facing = (direction.dot(normal) < 0)
-        if inward_facing:
-            outward_crossings -= 1
-        else:
-            outward_crossings += 1
-            if first_outward is None:
-                first_outward = (location, normal, index, distance)
+    # Check if the face is oriented towards the ray or away from it.
+    inward_facing = (direction.dot(normal) < 0)
+    if inward_facing:
+        # Must have been outside the object.
+        return NO_HIT
 
-        # Do the next raycast from just beyond the hit point.
-        ray_origin = location + tiny_step
-
-    pt_is_inside = (outward_crossings > 0)
-    if pt_is_inside:
-        return first_outward
-    else:
-        return (None, None, None, None)
+    return (location, normal, index, distance)
