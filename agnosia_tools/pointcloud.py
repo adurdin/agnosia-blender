@@ -131,6 +131,9 @@ def update_pointcloud(context, o):
     if not target:
         return False
     def sampler(count):
+        print("Does the other one still work!??!?")
+        test_bvh_raycast(o)
+        print("-------------")
         # return sphere_sample_obj(o, count)
         return volume_sample_obj(context, o, count)
     o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
@@ -198,6 +201,8 @@ def sphere_sample_obj(o, count):
     return (vertices, normals)
 
 def volume_sample_obj(context, o, count):
+
+
     # Sample the object by generating points within its bounds and
     # testing if they're inside it. Assumes the mesh is watertight.
     vertices = []
@@ -217,8 +222,8 @@ def volume_sample_obj(context, o, count):
     while len(vertices) < count:
         pt = next(it)
         # Cast outward from this point until we pass the bounding radius
-        ray_origin = pt
-        direction = Vector((1, 0, 0))
+        ray_origin = Vector((radius, radius, radius))
+        direction = (pt - ray_origin).normalized()
         tiny_step = (direction * 0.0001)
         previous_index = -1
         inward_count = 0
@@ -254,7 +259,7 @@ def volume_sample_obj(context, o, count):
     return (vertices, normals)
 
 
-def test_bvh_raycast(o, count):
+def test_bvh_raycast(o):
     bm = bmesh.new()
     bm.from_mesh(o.data)
     bvh = BVHTree.FromBMesh(bm)
