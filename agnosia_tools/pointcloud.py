@@ -110,15 +110,22 @@ def create_empty_mesh_obj(context, name):
 
 def create_pointcloud_mesh(context, name, sampler, count, target):
     mesh = bpy.data.meshes.new(name)
-    (vertices, normals) = sampler(count)
+    (vertices, normals, colors) = sampler(count)
     if vertices:
         mesh.from_pydata(vertices, [], [])
-        # This is supposed to set normals, but I can't get it to work:
-        # blender won't show them in edit mode, nor will it export them.
-        # Seems like per-vertex normals only actually work if you have edges/faces?
-        mesh.normals_split_custom_set_from_vertices(normals)
+        # # This is supposed to set normals, but I can't get it to work:
+        # # blender won't show them in edit mode, nor will it export them.
+        # # Seems like per-vertex normals only actually work if you have edges/faces?
+        # mesh.normals_split_custom_set_from_vertices(normals)
         mesh.validate(verbose=True, clean_customdata=False)
         mesh.update()
+
+        # color_layer = mesh.vertex_colors.new(name='Color', do_init=True)
+        # for (i, color) in enumerate(colors):
+        #     color_layer.data[i].color = color
+        # normal_layer = mesh.vertex_colors.new(name='Normal', do_init=True)
+        # for (i, normal) in enumerate(normals):
+        #     normal_layer.data[i].color = normal
     return mesh
 
 def update_pointcloud(context, o):
@@ -183,6 +190,7 @@ def sphere_sample_obj(o, count):
     # towards the origin.
     vertices = []
     normals = []
+    colors = []
     radius = object_bounding_radius(o) + 0.1
     it = iter(sphere_surface_points(radius))
     while len(vertices) < count:
@@ -191,7 +199,7 @@ def sphere_sample_obj(o, count):
         if result:
             vertices.append(position)
             normals.append(normal)
-    return (vertices, normals)
+    return (vertices, normals, colors)
 
 def raycast_to_exterior(bvh, pt, direction):
     """Raycast the BVHTree bvh from pt to the object's exterior.
@@ -246,6 +254,7 @@ def volume_sample_obj(context, o, count):
     # testing if they're inside it. Assumes the mesh is watertight.
     vertices = []
     normals = []
+    colors = []
     # FIXME: Should this be FromMesh(o.data) instead??
     #        Why FromObject, does it include children? if so, nice.
     bvh = BVHTree.FromObject(o, context.depsgraph)
@@ -265,37 +274,9 @@ def volume_sample_obj(context, o, count):
         pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
 
         if pt_is_inside:
+            surface_pt = hit0[0]
+            surface_normal = hit0[1]
             vertices.append(pt)
-            normals.append(Vector((1, 0, 0)))
-    return (vertices, normals)
-
-
-def test_bvh_raycast(o, count):
-    bm = bmesh.new()
-    bm.from_mesh(o.data)
-    bvh = BVHTree.FromBMesh(bm)
-    start = Vector((10, 0, 0))
-    direction = Vector((-1, 0, 0))
-
-    fail = 20
-    while fail > 0:
-        (location, normal, index, distance) = bvh.ray_cast(start, direction)
-        if location is None:
-            print("Raycast did not hit anything.")
-            break
-        else:
-            print(f"Hit at {location}, normal {normal}, index {index}, distance {distance}.")
-            start += direction * (distance * 1.01)
-        # Just ensure we stop sometime
-        fail -= 1
-    return ([], [])
-
-    # Okay, bvh raycast hits faces going in either direciton. We can dot the normal to see
-    # if it's inward or outward.
-
-    # Hit at <Vector (1.0000, 0.0000, 0.0000)>,
-    #     normal <Vector (1.0000, -0.0000, 0.0000)>,
-    #     index 4, distance 9.0.
-    # Hit at <Vector (-1.0000, 0.0000, 0.0000)>,
-    #     normal <Vector (-1.0000, -0.0000, 0.0000)>,
-    #     index 2, distance 1.9099998474121094.
+            normals.append(surface_normal)
+            colors.append((1, 0, 0))
+    return (vertices, normals, colors)
