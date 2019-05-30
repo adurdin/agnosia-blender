@@ -122,13 +122,15 @@ def create_pointcloud_mesh(context, name, sampler, count, target):
         # mesh.normals_split_custom_set_from_vertices(normals)
         mesh.validate(verbose=True, clean_customdata=False)
         mesh.update()
-
-        # color_layer = mesh.vertex_colors.new(name='Color', do_init=True)
-        # for (i, color) in enumerate(colors):
-        #     color_layer.data[i].color = color
-        # normal_layer = mesh.vertex_colors.new(name='Normal', do_init=True)
-        # for (i, normal) in enumerate(normals):
-        #     normal_layer.data[i].color = normal
+        # Apply per-vertex colors and normals
+        color_layer = mesh.vertex_colors.new(name='PointColor')
+        for (i, color) in enumerate(colors):
+            color_layer.data[i].color = color
+        normal_layer = mesh.vertex_colors.new(name='PointNormal')
+        for (i, normal) in enumerate(normals):
+            # Pack the normals into the color data
+            n = (normal / 2.0) + Vector((0.5, 0.5, 0.5))
+            normal_layer.data[i].color = (n[0], n[1], n[2], 0.0)
     return mesh
 
 def update_pointcloud(context, o):
@@ -236,6 +238,7 @@ def sphere_sample_obj(o, count):
         if result:
             vertices.append(position)
             normals.append(normal)
+            colors.append((1.0, 0.0, 1.0, 1.0))
     return (vertices, normals, colors)
 
 def raycast_to_exterior(bvh, pt, direction):
@@ -315,5 +318,9 @@ def volume_sample_obj(context, o, count):
             surface_normal = hit0[1]
             vertices.append(pt)
             normals.append(surface_normal)
-            colors.append((1, 0, 0))
+            # TEMP: color each point by its coordinates
+            r = (abs(pt[0]) / halfwidth)
+            g = (abs(pt[1]) / halfwidth)
+            b = (abs(pt[2]) / halfwidth)
+            colors.append((r, g, b, 1.0))
     return (vertices, normals, colors)
