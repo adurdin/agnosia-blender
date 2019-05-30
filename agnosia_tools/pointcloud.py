@@ -94,7 +94,7 @@ class PointcloudProperty(PropertyGroup):
 
 
 #---------------------------------------------------------------------------#
-# Core
+# Material
 
 def layout_nodes(node_tree, root_node):
     """Make all the nodes in node_tree, starting from root_node, nice and tidy."""
@@ -227,6 +227,10 @@ def assign_material(o, mat):
     else:
         o.data.materials.append(mat)
 
+
+#---------------------------------------------------------------------------#
+# Pointcloud objects.
+
 def create_pointcloud_from(context, target):
     o = create_empty_mesh_obj(context, 'Pointcloud')
     pc = o.pointclouds[0]
@@ -242,6 +246,24 @@ def create_empty_mesh_obj(context, name):
     context.scene.collection.objects.link(o)
     o.pointclouds.add()
     return o
+
+def update_pointcloud(context, o):
+    pc = o.pointclouds[0]
+    target = pc.obj_to_sample
+    if (target is None) or (target.type != 'MESH') or (target.pointclouds):
+        return False
+    seed = pc.seed
+    rng = random.Random(seed)
+    def sampler(count):
+        # return sphere_sample_obj(target, count, rng)
+        return volume_sample_obj(context, target, count, rng)
+    o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
+    assign_material(o, get_pointcloud_material())
+    return o
+
+
+#---------------------------------------------------------------------------#
+# Meshes for in-Blender visualization.
 
 def create_pointcloud_mesh(context, name, sampler, count, target):
     mesh = bpy.data.meshes.new(name)
@@ -264,19 +286,6 @@ def create_pointcloud_mesh(context, name, sampler, count, target):
             normal_layer.data[i].color = (n[0], n[1], n[2], 0.0)
     return mesh
 
-def update_pointcloud(context, o):
-    pc = o.pointclouds[0]
-    target = pc.obj_to_sample
-    if (target is None) or (target.type != 'MESH') or (target.pointclouds):
-        return False
-    seed = pc.seed
-    rng = random.Random(seed)
-    def sampler(count):
-        # return sphere_sample_obj(target, count, rng)
-        return volume_sample_obj(context, target, count, rng)
-    o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
-    assign_material(o, get_pointcloud_material())
-    return o
 
 def expand_vertex_data_to_mesh(vertices, normals, colors):
     expanded_vertices = []
@@ -311,6 +320,63 @@ def expand_vertex_data_to_mesh(vertices, normals, colors):
             ))
 
     return (expanded_vertices, faces, expanded_normals, expanded_colors)
+
+
+#---------------------------------------------------------------------------#
+# Pointcloud generation
+
+def sphere_sample_obj(o, count, rng):
+    # Sample the object by raycasting from a sphere surrounding it
+    # towards the origin.
+    vertices = []
+    normals = []
+    colors = []
+    radius = object_bounding_radius(o) + 0.1
+    it = iter(sphere_surface_points(radius, rng))
+    while len(vertices) < count:
+        pt = next(it)
+        result, position, normal, index = raycast_to_origin(o, pt)
+        if result:
+            vertices.append(position)
+            normals.append(normal)
+            colors.append((1.0, 0.0, 1.0, 1.0))
+    return (vertices, normals, colors)
+
+def volume_sample_obj(context, o, count, rng):
+    # Sample the object by generating points within its bounds and
+    # testing if they're inside it. Assumes the mesh is watertight.
+    vertices = []
+    normals = []
+    colors = []
+    # FIXME: Should this be FromMesh(o.data) instead??
+    #        Why FromObject, does it include children? if so, nice.
+    bvh = BVHTree.FromObject(o, context.depsgraph)
+    # bm = bmesh.new()
+    # bm.from_mesh(o.data)
+    # bvh = BVHTree.FromBMesh(bm)
+
+    halfwidth = object_bounding_halfwidth(o) + 0.1
+    it = iter(cube_volume_points(halfwidth, rng))
+    while len(vertices) < count:
+        pt = next(it)
+
+        # Two raycasts reduce the number of erroneous points.
+        hit0 = raycast_to_exterior(bvh, pt, Vector((1, 0, 0)))
+        # hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
+        # pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
+        pt_is_inside = hit0[0] is not None
+
+        if pt_is_inside:
+            surface_pt = hit0[0]
+            surface_normal = hit0[1]
+            vertices.append(pt)
+            normals.append(surface_normal)
+            # TEMP: color each point by its coordinates
+            r = (abs(pt[0]) / halfwidth)
+            g = (abs(pt[1]) / halfwidth)
+            b = (abs(pt[2]) / halfwidth)
+            colors.append((r, g, b, 1.0))
+    return (vertices, normals, colors)
 
 def object_bounding_radius(o):
     from math import sqrt
@@ -357,23 +423,6 @@ def raycast_to_origin(o, pt):
     origin = Vector((0.0, 0.0, 0.0))
     direction = (origin - pt).normalized()
     return o.ray_cast(pt, direction)
-
-def sphere_sample_obj(o, count, rng):
-    # Sample the object by raycasting from a sphere surrounding it
-    # towards the origin.
-    vertices = []
-    normals = []
-    colors = []
-    radius = object_bounding_radius(o) + 0.1
-    it = iter(sphere_surface_points(radius, rng))
-    while len(vertices) < count:
-        pt = next(it)
-        result, position, normal, index = raycast_to_origin(o, pt)
-        if result:
-            vertices.append(position)
-            normals.append(normal)
-            colors.append((1.0, 0.0, 1.0, 1.0))
-    return (vertices, normals, colors)
 
 def raycast_to_exterior(bvh, pt, direction):
     """Raycast the BVHTree bvh from pt to the object's exterior.
@@ -429,39 +478,3 @@ def raycast_to_exterior(bvh, pt, direction):
         return first_outward
     else:
         return (None, None, None, None)
-
-def volume_sample_obj(context, o, count, rng):
-    # Sample the object by generating points within its bounds and
-    # testing if they're inside it. Assumes the mesh is watertight.
-    vertices = []
-    normals = []
-    colors = []
-    # FIXME: Should this be FromMesh(o.data) instead??
-    #        Why FromObject, does it include children? if so, nice.
-    bvh = BVHTree.FromObject(o, context.depsgraph)
-    # bm = bmesh.new()
-    # bm.from_mesh(o.data)
-    # bvh = BVHTree.FromBMesh(bm)
-
-    halfwidth = object_bounding_halfwidth(o) + 0.1
-    it = iter(cube_volume_points(halfwidth, rng))
-    while len(vertices) < count:
-        pt = next(it)
-
-        # Two raycasts reduce the number of erroneous points.
-        hit0 = raycast_to_exterior(bvh, pt, Vector((1, 0, 0)))
-        # hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
-        # pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
-        pt_is_inside = hit0[0] is not None
-
-        if pt_is_inside:
-            surface_pt = hit0[0]
-            surface_normal = hit0[1]
-            vertices.append(pt)
-            normals.append(surface_normal)
-            # TEMP: color each point by its coordinates
-            r = (abs(pt[0]) / halfwidth)
-            g = (abs(pt[1]) / halfwidth)
-            b = (abs(pt[2]) / halfwidth)
-            colors.append((r, g, b, 1.0))
-    return (vertices, normals, colors)
