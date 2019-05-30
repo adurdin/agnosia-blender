@@ -111,8 +111,11 @@ def create_empty_mesh_obj(context, name):
 def create_pointcloud_mesh(context, name, sampler, count, target):
     mesh = bpy.data.meshes.new(name)
     (vertices, normals, colors) = sampler(count)
+    # Expand each vertex to make a quad facing the -y axis.
     if vertices:
-        mesh.from_pydata(vertices, [], [])
+        (vertices, faces, normals, colors) = \
+            expand_vertex_data_to_mesh(vertices, normals, colors)
+        mesh.from_pydata(vertices, [], faces)
         # # This is supposed to set normals, but I can't get it to work:
         # # blender won't show them in edit mode, nor will it export them.
         # # Seems like per-vertex normals only actually work if you have edges/faces?
@@ -138,6 +141,40 @@ def update_pointcloud(context, o):
         return volume_sample_obj(context, target, count)
     o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
     return o
+
+def expand_vertex_data_to_mesh(vertices, normals, colors):
+    expanded_vertices = []
+    expanded_normals = []
+    expanded_colors = []
+    faces = []
+
+    scale = 0.01
+    quad = (
+        Vector((1, 0, 1)) * scale,
+        Vector((-1, 0, 1)) * scale,
+        Vector((-1, 0, -1)) * scale,
+        Vector((1, 0, -1)) * scale,
+        )
+
+    # Expand the source data to a quad.
+    for v in vertices:
+        expanded_vertices.extend((v + quad[0], v + quad[1], v + quad[2], v + quad[3]))
+    for n in normals:
+        expanded_normals.extend((n, n, n, n))
+    for c in colors:
+        expanded_colors.extend((c, c, c, c))
+
+    # Generate faces
+    for i in range(len(vertices)):
+        base = (4 * i)
+        faces.append((
+            base + 0,
+            base + 1,
+            base + 2,
+            base + 3,
+            ))
+
+    return (expanded_vertices, faces, expanded_normals, expanded_colors)
 
 def object_bounding_radius(o):
     from math import sqrt
