@@ -130,7 +130,7 @@ def update_pointcloud(o):
     target = pc.obj_to_sample
     if not target:
         return False
-    o.data = create_pointcloud_mesh(o.data.name, sphere_sample_obj, pc.point_count, target)
+    o.data = create_pointcloud_mesh(o.data.name, test_bvh_raycast, pc.point_count, target)
     return o
 
 def object_bounding_radius(o):
