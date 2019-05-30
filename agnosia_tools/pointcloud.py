@@ -365,7 +365,8 @@ def expand_vertex_data_to_mesh(vertices, normals, colors):
     expanded_colors = []
     faces = []
 
-    scale = 0.01
+    # Size of the mesh representing a point.
+    scale = 0.05
     quad = (
         Vector((1, 0, 1)) * scale,
         Vector((-1, 0, 1)) * scale,
