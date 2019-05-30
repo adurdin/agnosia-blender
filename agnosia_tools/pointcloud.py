@@ -73,6 +73,7 @@ class AGNOSIA_PT_pointcloud(Panel):
         box = layout.box()
         box.prop(pc, 'obj_to_sample')
         box.prop(pc, 'point_count')
+        box.prop(pc, 'seed')
 
 
 #---------------------------------------------------------------------------#
@@ -84,6 +85,7 @@ def update(self, context):
 class PointcloudProperty(PropertyGroup):
     obj_to_sample : PointerProperty(name="Sample", type=Object, update=update)
     point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=update)
+    seed : IntProperty(name="Seed", default=0, update=update)
 
     def update(self, context):
         o = context.object
@@ -227,7 +229,9 @@ def assign_material(o, mat):
 
 def create_pointcloud_from(context, target):
     o = create_empty_mesh_obj(context, 'Pointcloud')
-    o.pointclouds[0].obj_to_sample = target
+    pc = o.pointclouds[0]
+    pc.obj_to_sample = target
+    pc.seed = random.randint(-2**31, 2**31)
     update_pointcloud(context, o)
     return o
 
@@ -265,9 +269,11 @@ def update_pointcloud(context, o):
     target = pc.obj_to_sample
     if (target is None) or (target.type != 'MESH') or (target.pointclouds):
         return False
+    seed = pc.seed
+    rng = random.Random(seed)
     def sampler(count):
-        # return sphere_sample_obj(target, count)
-        return volume_sample_obj(context, target, count)
+        # return sphere_sample_obj(target, count, rng)
+        return volume_sample_obj(context, target, count, rng)
     o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
     assign_material(o, get_pointcloud_material())
     return o
@@ -352,14 +358,14 @@ def raycast_to_origin(o, pt):
     direction = (origin - pt).normalized()
     return o.ray_cast(pt, direction)
 
-def sphere_sample_obj(o, count):
+def sphere_sample_obj(o, count, rng):
     # Sample the object by raycasting from a sphere surrounding it
     # towards the origin.
     vertices = []
     normals = []
     colors = []
     radius = object_bounding_radius(o) + 0.1
-    it = iter(sphere_surface_points(radius))
+    it = iter(sphere_surface_points(radius, rng))
     while len(vertices) < count:
         pt = next(it)
         result, position, normal, index = raycast_to_origin(o, pt)
@@ -424,7 +430,7 @@ def raycast_to_exterior(bvh, pt, direction):
     else:
         return (None, None, None, None)
 
-def volume_sample_obj(context, o, count):
+def volume_sample_obj(context, o, count, rng):
     # Sample the object by generating points within its bounds and
     # testing if they're inside it. Assumes the mesh is watertight.
     vertices = []
@@ -438,7 +444,7 @@ def volume_sample_obj(context, o, count):
     # bvh = BVHTree.FromBMesh(bm)
 
     halfwidth = object_bounding_halfwidth(o) + 0.1
-    it = iter(cube_volume_points(halfwidth))
+    it = iter(cube_volume_points(halfwidth, rng))
     while len(vertices) < count:
         pt = next(it)
 
