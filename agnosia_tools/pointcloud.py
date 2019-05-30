@@ -250,8 +250,15 @@ def raycast_to_exterior(bvh, pt, direction):
     return false positives. Do two different raycasts in two perpendicular
     directions if you need more certainty."""
 
+    origin = Vector((0, 0, 0))
+    from_origin = (pt - origin)
+    # If the point's too close to the origin, we can't get a proper direction,
+    # so just skip it.
+    if (from_origin.length < 0.0001):
+        return (None, None, None, None)
+
     ray_origin = pt
-    direction = direction.normalized()
+    direction = from_origin.normalized()
 
     # Raycast from the point towards the exterior, iterating
     # until we don't hit any faces.
@@ -302,7 +309,6 @@ def volume_sample_obj(context, o, count):
     # bm.from_mesh(o.data)
     # bvh = BVHTree.FromBMesh(bm)
 
-    radius = object_bounding_radius(o) + 0.1
     halfwidth = object_bounding_halfwidth(o) + 0.1
     it = iter(cube_volume_points(halfwidth))
     while len(vertices) < count:
@@ -310,8 +316,9 @@ def volume_sample_obj(context, o, count):
 
         # Two raycasts reduce the number of erroneous points.
         hit0 = raycast_to_exterior(bvh, pt, Vector((1, 0, 0)))
-        hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
-        pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
+        # hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
+        # pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
+        pt_is_inside = hit0[0] is not None
 
         if pt_is_inside:
             surface_pt = hit0[0]
