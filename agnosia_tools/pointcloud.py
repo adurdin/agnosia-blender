@@ -94,18 +94,6 @@ class PointcloudProperty(PropertyGroup):
 #---------------------------------------------------------------------------#
 # Core
 
-UNPACK_NORMALS_SCRIPT = """\
-    shader unpack_normals(
-        vector PackedNormal = vector(0, 0, 0),
-        output vector Normal = vector(0, 0, 0))
-    {
-        vector v = PackedNormal.xyz;
-        v -= vector(0.5, 0.5, 0.5);
-        v *= 2.0;
-        Normal = v;
-    }
-"""
-
 def layout_nodes(node_tree, root_node):
     """Make all the nodes in node_tree, starting from root_node, nice and tidy."""
     from collections import defaultdict
@@ -145,26 +133,28 @@ def layout_nodes(node_tree, root_node):
             links.extend(incoming[n])
 
     # Now lay out all the nodes right-to-left, with each column vertically
-    # centered with respect to all the other columns.
+    # centered with respect to all the other columns. Coordinates are +Y up, +X right.
     grid_size = 20.0
-    title_height = grid_size
+    def total_height(n):
+        # Height of a node including its title bar. Not exact numbers, but good enough.
+        return (20.0 if n.hide else (n.height + 30.0))
     column_location = Vector((0.0, 0.0)) # x: right edge, y: center.
-    spacing = Vector((4.0, 2.0)) * grid_size
+    spacing = Vector((3.0, 2.0)) * grid_size
     for i, column in enumerate(all_columns):
         # Calculate the total size
-        total_node_width = max(ceil(n.width) for n in column)
-        total_node_height = sum(ceil(n.height + title_height) for n in column)
-        padding = spacing[1] * (len(column) - 1)
-        column_width = ceil(total_node_width / grid_size) * grid_size
-        column_height = total_node_height + padding
+        max_node_width = max(ceil(n.width) for n in column)
+        total_node_height = sum(ceil(total_height(n)) for n in column)
+        total_spacing = spacing[1] * (len(column) - 1)
+        column_width = ceil(max_node_width / grid_size) * grid_size
+        column_height = total_node_height + total_spacing
         # Lay out these nodes vertically down the column.
         x = column_location[0] - (column_width / 2.0)
         y = column_location[1] + (column_height / 2.0)
         for n in column:
             node_x = round(x - n.width / 2.0)
-            node_y = round(y - (n.height + title_height) / 2.0)
+            node_y = y #round(y - total_height(n) / 2.0)
             n.location = Vector((node_x, node_y))
-            y -= (ceil(n.height + title_height + spacing[1]))
+            y -= (ceil(total_height(n) + spacing[1]))
         column_location[0] -= (column_width + spacing[0])
 
 def define_pointcloud_material(material):
@@ -184,23 +174,40 @@ def define_pointcloud_material(material):
     diffuse.inputs['Roughness'].default_value = 0.5
     links.new(diffuse.outputs['BSDF'], output.inputs['Surface'])
 
+    # Get colors and normals from the vertex color layers.
     colors = nodes.new(type='ShaderNodeAttribute')
+    colors.label = "PointColor Attribute"
     colors.attribute_name = 'PointColor'
     links.new(colors.outputs['Color'], diffuse.inputs['Color'])
 
-    text = bpy.data.texts.new(name='UnpackNormalsNode')
-    text.from_string(UNPACK_NORMALS_SCRIPT)
-    unpack_normals = nodes.new(type='ShaderNodeScript')
-    unpack_normals.label = "Unpack Normals"
-    unpack_normals.mode = 'INTERNAL'
-    unpack_normals.script = text
-    unpack_normals.inputs.new(name='Packed Normal', type='NodeSocketVectorXYZ')
-    unpack_normals.outputs.new(name='Normal', type='NodeSocketVectorXYZ')
-    links.new(unpack_normals.outputs['Normal'], diffuse.inputs['Normal'])
-
     normals = nodes.new(type='ShaderNodeAttribute')
+    colors.label = "PointNormal Attribute"
     normals.attribute_name = 'PointNormal'
-    links.new(normals.outputs['Vector'], unpack_normals.inputs['Packed Normal'])
+
+    # Create nodes to unpack the normals from the second vertex color layer.
+    combine = nodes.new(type='ShaderNodeCombineXYZ')
+    combine.hide = True
+    links.new(combine.outputs['Vector'], diffuse.inputs['Normal'])
+
+    separate = nodes.new(type='ShaderNodeSeparateXYZ')
+    separate.hide = True
+    links.new(normals.outputs['Vector'], separate.inputs['Vector'])
+
+    # Each of the X, Y, and Z channels needs (foo - 0.5) * 2.0
+    for i in range(3):
+        sub = nodes.new(type='ShaderNodeMath')
+        sub.label = " - 0.5"
+        sub.operation = 'SUBTRACT'
+        sub.hide = True
+        sub.inputs[1].default_value = 0.5
+        links.new(separate.outputs[i], sub.inputs[0])
+        mul = nodes.new(type='ShaderNodeMath')
+        mul.label = " * 2.0"
+        mul.operation = 'MULTIPLY'
+        mul.hide = True
+        mul.inputs[1].default_value = 2.0
+        links.new(sub.outputs[0], mul.inputs[0])
+        links.new(mul.outputs[0], combine.inputs[i])
 
     layout_nodes(tree, output)
 
