@@ -18,10 +18,10 @@ class AgnosiaCreatePointcloudOperator(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        if bpy.context.mode != "OBJECT":
+        if context.mode != "OBJECT":
             self.report({'WARNING'}, "Create pointcloud: must be in Object mode.")
             return {'CANCELLED'}
-        target = bpy.context.object
+        target = context.object
         if (target is None) or (target.type != 'MESH'):
             self.report({'WARNING'}, "Create pointcloud: must select a Mesh object.")
             return {'CANCELLED'}
@@ -29,18 +29,82 @@ class AgnosiaCreatePointcloudOperator(Operator):
             self.report({'WARNING'}, "Create pointcloud: can't create a pointcloud from a pointcloud.")
             return {'CANCELLED'}
 
-        # Create a pointcloud.
-        o = create_pointcloud_from(context, target)
-
-        # Make the pointcloud active, and select it.
-        bpy.context.view_layer.objects.active = o
-        o.select_set(True)
-
         # Deselect and hide the sampled object.
         target.select_set(False)
         target.hide_set(True)
 
+        # Create a new pointcloud.
+        o = create_pointcloud_from(context, target)
+
+        # Make the pointcloud active, and select it.
+        context.view_layer.objects.active = o
+        o.select_set(True)
+
+        # And begin updating the new pointcloud.
+        bpy.ops.object.update_pointcloud()
+
         return {'FINISHED'}
+
+
+class AgnosiaUpdatePointcloudOperator(Operator):
+    bl_idname = "object.update_pointcloud"
+    bl_label = "Update pointcloud"
+    bl_options = set()
+
+    _timer = None
+    _generator = None
+    _finished = False
+    _cancelled = False
+    _object = None
+
+    # Class variable
+    _running_on = {}
+
+    def execute(self, context):
+        self._object = context.object
+
+        # Only allow one instance of the operator to run on any given object at a time.
+        prior_op = self.__class__._running_on.get(self._object)
+        if prior_op is not None:
+            prior_op.abort()
+        self.__class__._running_on[self._object] = self
+
+        self._generator = update_pointcloud_iter(self._object)
+        self._cancelled = False
+        self._finished = False
+
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.1, window=context.window)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        if event.type in {'RIGHTMOUSE', 'ESC'}:
+            self._cancelled = True
+
+        if self._cancelled or self._finished:
+            # Remove ourselves
+            if self.__class__._running_on.get(self._object) == self:
+                del self.__class__._running_on[self._object]
+            # Remove the timer
+            wm = context.window_manager
+            wm.event_timer_remove(self._timer)
+            self._timer = None
+
+        if self._cancelled:
+            return {'CANCELLED'}
+        elif self._finished:
+            return {'FINISHED'}
+        elif event.type == 'TIMER':
+            try:
+                next(self._generator)
+            except StopIteration:
+                self._finished = True
+
+        return {'PASS_THROUGH'}
+
+    def abort(self):
+        self._cancelled = True
 
 
 #---------------------------------------------------------------------------#
@@ -71,7 +135,7 @@ class AGNOSIA_PT_pointcloud(Panel):
         box = row.box()
         box.label(text="There is nothing here that you recognise. Yet.");
         box = layout.box()
-        box.prop(pc, 'obj_to_sample')
+        box.prop(pc, 'target')
         box.prop(pc, 'point_count')
         box.prop(pc, 'seed')
 
@@ -79,18 +143,13 @@ class AGNOSIA_PT_pointcloud(Panel):
 #---------------------------------------------------------------------------#
 # Properties
 
-def update(self, context):
-    self.update(context)
+def _pointcloud_property_update(self, context):
+    bpy.ops.object.update_pointcloud()
 
 class PointcloudProperty(PropertyGroup):
-    obj_to_sample : PointerProperty(name="Sample", type=Object, update=update)
-    point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=update)
-    seed : IntProperty(name="Seed", default=0, update=update)
-
-    def update(self, context):
-        o = context.object
-        if not o.pointclouds: return
-        update_pointcloud(context, o)
+    target : PointerProperty(name="Sample", type=Object, update=_pointcloud_property_update)
+    point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=_pointcloud_property_update)
+    seed : IntProperty(name="Seed", default=0, update=_pointcloud_property_update)
 
 
 #---------------------------------------------------------------------------#
@@ -234,9 +293,8 @@ def assign_material(o, mat):
 def create_pointcloud_from(context, target):
     o = create_empty_mesh_obj(context, 'Pointcloud')
     pc = o.pointclouds[0]
-    pc.obj_to_sample = target
+    pc.target = target
     pc.seed = random.randint(-2**31, 2**31)
-    update_pointcloud(context, o)
     return o
 
 def create_empty_mesh_obj(context, name):
@@ -247,27 +305,41 @@ def create_empty_mesh_obj(context, name):
     o.pointclouds.add()
     return o
 
-def update_pointcloud(context, o):
+def update_pointcloud_iter(o):
+    if not o.pointclouds:
+        return
     pc = o.pointclouds[0]
-    target = pc.obj_to_sample
+    target = pc.target
     if (target is None) or (target.type != 'MESH') or (target.pointclouds):
-        return False
+        return
     seed = pc.seed
     rng = random.Random(seed)
-    def sampler(count):
-        # return sphere_sample_obj(target, count, rng)
-        return volume_sample_obj(context, target, count, rng)
-    o.data = create_pointcloud_mesh(context, o.data.name, sampler, pc.point_count, target)
+    for data in generate_points(pc.target, pc.point_count, rng, step_count=4096):
+        yield
+    o.data = create_pointcloud_mesh(o.data.name, data)
     assign_material(o, get_pointcloud_material())
-    return o
 
+def generate_points(target, count, rng=random, step_count=0):
+    if not step_count: step_count = count
+    total_count = 0
+    total_data = [[], [], []]
+    while total_count < count:
+        # data = sphere_sample_obj(pc.target, pc.point_count, rng)
+        step_count = min(step_count, (count - total_count))
+        data = volume_sample_obj(target, step_count, rng)
+        for i in range(len(total_data)):
+            total_data[i] += data[i]
+        total_count += step_count
+        if total_count < count:
+            yield list(total_data)
+    yield total_data
 
 #---------------------------------------------------------------------------#
 # Meshes for in-Blender visualization.
 
-def create_pointcloud_mesh(context, name, sampler, count, target):
+def create_pointcloud_mesh(name, data):
     mesh = bpy.data.meshes.new(name)
-    (vertices, normals, colors) = sampler(count)
+    (vertices, normals, colors) = data
     # Expand each vertex to make a quad facing the -y axis.
     if vertices:
         (vertices, faces, normals, colors) = \
@@ -323,7 +395,7 @@ def expand_vertex_data_to_mesh(vertices, normals, colors):
 
 
 #---------------------------------------------------------------------------#
-# Pointcloud generation
+# Sampling.
 
 def sphere_sample_obj(o, count, rng):
     # Sample the object by raycasting from a sphere surrounding it
@@ -342,7 +414,7 @@ def sphere_sample_obj(o, count, rng):
             colors.append((1.0, 0.0, 1.0, 1.0))
     return (vertices, normals, colors)
 
-def volume_sample_obj(context, o, count, rng):
+def volume_sample_obj(o, count, rng):
     # Sample the object by generating points within its bounds and
     # testing if they're inside it. Assumes the mesh is watertight.
     vertices = []
@@ -350,7 +422,7 @@ def volume_sample_obj(context, o, count, rng):
     colors = []
     # FIXME: Should this be FromMesh(o.data) instead??
     #        Why FromObject, does it include children? if so, nice.
-    bvh = BVHTree.FromObject(o, context.depsgraph)
+    bvh = BVHTree.FromObject(o, bpy.context.depsgraph)
     # bm = bmesh.new()
     # bm.from_mesh(o.data)
     # bvh = BVHTree.FromBMesh(bm)
@@ -391,7 +463,7 @@ def object_bounding_halfwidth(o):
         halfwidth = max(halfwidth, abs(x), abs(y), abs(z))
     return halfwidth
 
-def sphere_surface_points(radius, rng=random):
+def sphere_surface_points(radius, rng):
     # Generate Vectors randomly distributed on the surface of
     # a sphere with the given radius.
     while True:
@@ -405,7 +477,7 @@ def sphere_surface_points(radius, rng=random):
         z = radius * cos(phi)
         yield Vector((x, y, z))
 
-def cube_volume_points(halfwidth, rng=random):
+def cube_volume_points(halfwidth, rng):
     # Generate Vectors randomly distributed within the volume
     # of a cube with the given halfwidth.
     while True:
