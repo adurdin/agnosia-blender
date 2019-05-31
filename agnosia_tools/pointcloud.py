@@ -9,6 +9,7 @@ import zlib
 from array import array
 from bpy.props import IntProperty, PointerProperty, StringProperty
 from bpy.types import Object, Operator, Panel, PropertyGroup
+from itertools import chain, zip_longest
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
@@ -409,43 +410,59 @@ def update_pointcloud_iter(o):
         return
     seed = pc.seed
     rng = random.Random(seed)
-    for data in generate_points(pc.target, pc.point_count, rng, step_count=4096):
+    points = generate_points(pc.target, pc.point_count, rng, step_count=4096)
+    for (raw_vertices, raw_normals, raw_colors) in points:
         yield
-
-    vertices_arr = array('f', (f for vec in data[0] for f in vec))
-    normals_arr = array('f', (f for vec in data[1] for f in vec))
-    colors_arr = array('f', (f for vec in data[2] for f in vec))
-    pc.set_raw_data(vertices_arr, normals=normals_arr, colors=colors_arr)
-
-    o.data = create_pointcloud_mesh(o.data.name, data)
+    pc.set_raw_data(raw_vertices, raw_normals, raw_colors)
+    o.data = create_pointcloud_mesh(o.data.name, raw_vertices, raw_normals, raw_colors)
     assign_material(o, get_pointcloud_material())
 
 def generate_points(target, count, rng=random, step_count=0):
     if not step_count: step_count = count
     total_count = 0
-    total_data = [[], [], []]
+    total_vertices = array('f')
+    total_normals = array('f')
+    total_colors = array('f')
     while total_count < count:
         # data = sphere_sample_obj(pc.target, pc.point_count, rng)
         step_count = min(step_count, (count - total_count))
-        data = volume_sample_obj(target, step_count, rng)
-        for i in range(len(total_data)):
-            total_data[i] += data[i]
+        (vertices, normals, colors) = volume_sample_obj(target, step_count, rng)
+        total_vertices.extend(vertices)
+        total_normals.extend(normals)
+        total_colors.extend(colors)
         total_count += step_count
         if total_count < count:
-            yield list(total_data)
-    yield total_data
+            yield None
+    yield (total_vertices, total_normals, total_colors)
 
 #---------------------------------------------------------------------------#
 # Meshes for in-Blender visualization.
 
-def create_pointcloud_mesh(name, data):
+def groups_of(iterable, n, fillvalue=None):
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
+
+def create_pointcloud_mesh(name, raw_vertices, raw_normals, raw_colors):
     mesh = bpy.data.meshes.new(name)
-    (vertices, normals, colors) = data
+    # Convert the arrays into sequences of Vector
+    vertices =(Vector(g) for g in groups_of(raw_vertices, 3))
+    normals = (Vector(g) for g in groups_of(raw_normals, 3))
+    colors = (Vector(g[:3]) for g in groups_of(raw_colors, 4))
     # Expand each vertex to make a quad facing the -y axis.
     if vertices:
-        (vertices, faces, normals, colors) = \
+        (vertices, normals, colors, faces) = \
             expand_vertex_data_to_mesh(vertices, normals, colors)
-        mesh.from_pydata(vertices, [], faces)
+        # from_pydata requires sequences, not iterators.
+        vertices = list(vertices)
+        normals = list(normals)
+        colors = list(colors)
+        faces = list(faces)
+        print(f"vertices: {vertices[:12]}...")
+        print(f"normals: {normals[:12]}...")
+        print(f"colors: {colors[:12]}...")
+        print(f"faces: {faces[:12]}...")
+
+        mesh.from_pydata(list(vertices), [], list(faces))
         mesh.validate(verbose=True, clean_customdata=False)
         mesh.update()
         # Apply per-vertex colors and normals
@@ -461,11 +478,6 @@ def create_pointcloud_mesh(name, data):
 
 
 def expand_vertex_data_to_mesh(vertices, normals, colors):
-    expanded_vertices = []
-    expanded_normals = []
-    expanded_colors = []
-    faces = []
-
     # Size of the mesh representing a point.
     scale = 0.05
     quad = (
@@ -476,24 +488,14 @@ def expand_vertex_data_to_mesh(vertices, normals, colors):
         )
 
     # Expand the source data to a quad.
-    for v in vertices:
-        expanded_vertices.extend((v + quad[0], v + quad[1], v + quad[2], v + quad[3]))
-    for n in normals:
-        expanded_normals.extend((n, n, n, n))
-    for c in colors:
-        expanded_colors.extend((c, c, c, c))
+    expanded_vertices = chain.from_iterable((v + quad[0], v + quad[1], v + quad[2], v + quad[3]) for v in vertices)
+    expanded_normals = chain.from_iterable((n, n, n, n) for n in normals)
+    expanded_colors = chain.from_iterable((c, c, c, c) for c in colors)
 
     # Generate faces
-    for i in range(len(vertices)):
-        base = (4 * i)
-        faces.append((
-            base + 0,
-            base + 1,
-            base + 2,
-            base + 3,
-            ))
+    faces = ((4*i+0, 4*i+1, 4*i+2, 4*i+3) for (i, _) in enumerate(vertices))
 
-    return (expanded_vertices, faces, expanded_normals, expanded_colors)
+    return (expanded_vertices, expanded_normals, expanded_colors, faces)
 
 
 #---------------------------------------------------------------------------#
@@ -519,9 +521,9 @@ def sphere_sample_obj(o, count, rng):
 def volume_sample_obj(o, count, rng):
     # Sample the object by generating points within its bounds and
     # testing if they're inside it. Assumes the mesh is watertight.
-    vertices = []
-    normals = []
-    colors = []
+    vertices = array('f')
+    normals = array('f')
+    colors = array('f')
     # FIXME: Should this be FromMesh(o.data) instead??
     #        Why FromObject, does it include children? if so, nice.
     bvh = BVHTree.FromObject(o, bpy.context.depsgraph)
@@ -534,22 +536,16 @@ def volume_sample_obj(o, count, rng):
     while len(vertices) < count:
         pt = next(it)
 
-        # Two raycasts reduce the number of erroneous points.
-        hit0 = raycast_to_exterior(bvh, pt, Vector((1, 0, 0)))
-        # hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
-        # pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
-        pt_is_inside = hit0[0] is not None
-
+        (location, normal, index, distance) = raycast_to_exterior(bvh, pt)
+        pt_is_inside = (location is not None)
         if pt_is_inside:
-            surface_pt = hit0[0]
-            surface_normal = hit0[1]
-            vertices.append(pt)
-            normals.append(surface_normal)
+            vertices.extend(location)
+            normals.extend(normal)
             # TEMP: color each point by its coordinates
             r = (abs(pt[0]) / halfwidth)
             g = (abs(pt[1]) / halfwidth)
             b = (abs(pt[2]) / halfwidth)
-            colors.append((r, g, b, 1.0))
+            colors.extend((r, g, b, 1.0))
     return (vertices, normals, colors)
 
 def object_bounding_radius(o):
@@ -598,7 +594,7 @@ def raycast_to_origin(o, pt):
     direction = (origin - pt).normalized()
     return o.ray_cast(pt, direction)
 
-def raycast_to_exterior(bvh, pt, direction):
+def raycast_to_exterior(bvh, pt):
     """Raycast the BVHTree bvh from pt to the object's exterior.
     If pt is on the object's interior, return (location, normal, index, distance);
     if it's on the exterior, return (None, None, None, None).
