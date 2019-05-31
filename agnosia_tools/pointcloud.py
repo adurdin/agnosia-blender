@@ -4,9 +4,11 @@ import base64
 import math
 import mathutils
 import random
+import struct
 import zlib
 
 from array import array
+from itertools import islice
 from bpy.props import IntProperty, PointerProperty, StringProperty
 from bpy.types import Object, Operator, Panel, PropertyGroup
 from mathutils import Vector
@@ -110,6 +112,60 @@ class AgnosiaUpdatePointcloudOperator(Operator):
         self._cancelled = True
 
 
+class AgnosiaPointcloudExportOperator(Operator):
+    bl_idname = "object.export_pointcloud"
+    bl_label = "Export pointcloud"
+    bl_options = {'REGISTER'}
+
+    filepath : bpy.props.StringProperty(subtype="FILE_PATH")
+
+    @classmethod
+    def poll(cls, context):
+        o = context.object
+        return (
+            (context.mode == 'OBJECT')
+            and (o is not None)
+            and (len(o.pointclouds) > 0)
+            )
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        o = context.object
+        pc = o.pointclouds[0]
+
+        with file_atomic(self.filepath, 'wb') as f:
+            # File format:
+            #     'A' 'R' 'G' 'H'
+            #     uint32_t size
+            #     struct record {
+            #         float x, y, z;
+            #         float nx, ny, nz;
+            #         float r, g, b, a;
+            #     } records[size / sizeof(struct record)]
+            vertices = pc.raw_vertices
+            normals = pc.raw_normals
+            colors = pc.raw_colors
+            size = 4 * (len(vertices) + len(normals) + len(colors))
+            f.write(struct.pack('=4sL', b'ARGH', size))
+            def records():
+                v = iter(vertices)
+                n = iter(normals)
+                c = iter(colors)
+                while True:
+                    r = list(islice(v, 3)) + list(islice(n, 3)) + list(islice(c, 4))
+                    if r:
+                        yield r
+                    else:
+                        break
+            for r in records():
+                f.write(struct.pack('=3f3f4f', *r))
+
+        return {'FINISHED'}
+
+
 #---------------------------------------------------------------------------#
 # Panels
 
@@ -141,6 +197,7 @@ class AGNOSIA_PT_pointcloud(Panel):
         box.prop(pc, 'target')
         box.prop(pc, 'point_count')
         box.prop(pc, 'seed')
+        layout.operator('object.export_pointcloud', text="Export .cloud")
 
 
 #---------------------------------------------------------------------------#
@@ -625,3 +682,74 @@ def raycast_to_exterior(bvh, pt):
         return NO_HIT
 
     return (location, normal, index, distance)
+
+
+#---------------------------------------------------------------------------#
+# Utils.
+
+from contextlib import contextmanager
+
+@contextmanager
+def tempfile(suffix='', dir=None):
+    """ Context for temporary file.
+
+    Will find a free temporary filename upon entering
+    and will try to delete the file on leaving, even in case of an exception.
+
+    Parameters
+    ----------
+    suffix : string
+        optional file suffix
+    dir : string
+        optional directory to save temporary file in
+    """
+    # From: https://stackoverflow.com/a/29491523
+    import os
+    import tempfile as tmp
+
+    tf = tmp.NamedTemporaryFile(delete=False, suffix=suffix, dir=dir)
+    tf.file.close()
+    try:
+        yield tf.name
+    finally:
+        try:
+            os.remove(tf.name)
+        except OSError as e:
+            if e.errno == 2:
+                pass
+            else:
+                raise
+
+@contextmanager
+def file_atomic(filepath, *args, **kwargs):
+    """ Open temporary file object that atomically moves to destination upon
+    exiting.
+
+    Allows reading and writing to and from the same filename.
+
+    The file will not be moved to destination in case of an exception.
+
+    Parameters
+    ----------
+    filepath : string
+        the file path to be opened
+    fsync : bool
+        whether to force write the file to disk
+    *args : mixed
+        Any valid arguments for :code:`open`
+    **kwargs : mixed
+        Any valid keyword arguments for :code:`open`
+    """
+    # From: https://stackoverflow.com/a/29491523
+    import os
+    fsync = kwargs.get('fsync', False)
+
+    with tempfile(dir=os.path.dirname(os.path.abspath(filepath))) as tmppath:
+        with open(tmppath, *args, **kwargs) as file:
+            try:
+                yield file
+            finally:
+                if fsync:
+                    file.flush()
+                    os.fsync(file.fileno())
+        os.rename(tmppath, filepath)

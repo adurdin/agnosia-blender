@@ -62,6 +62,7 @@ def register():
     # Add operators
     bpy.utils.register_class(pointcloud.AgnosiaCreatePointcloudOperator)
     bpy.utils.register_class(pointcloud.AgnosiaUpdatePointcloudOperator)
+    bpy.utils.register_class(pointcloud.AgnosiaPointcloudExportOperator)
 
     # Add panels
     bpy.utils.register_class(TOOLS_PT_agnosia_create)
@@ -96,6 +97,7 @@ def unregister():
     bpy.utils.unregister_class(TOOLS_PT_agnosia_create)
 
     # Remove operators
+    bpy.utils.unregister_class(pointcloud.AgnosiaPointcloudExportOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaUpdatePointcloudOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaCreatePointcloudOperator)
 
