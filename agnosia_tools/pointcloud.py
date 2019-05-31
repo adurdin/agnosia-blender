@@ -136,32 +136,28 @@ class AgnosiaPointcloudExportOperator(Operator):
         o = context.object
         pc = o.pointclouds[0]
 
-        with file_atomic(self.filepath, 'wb') as f:
-            # File format:
-            #     'A' 'R' 'G' 'H'
-            #     uint32_t size
-            #     struct record {
-            #         float x, y, z;
-            #         float nx, ny, nz;
-            #         float r, g, b, a;
-            #     } records[size / sizeof(struct record)]
+        def to_uint8(f):
+            return min(max(0, int(f * 255.0)), 255)
+
+        with PointcloudBinWriter(self.filepath) as f:
             vertices = pc.raw_vertices
             normals = pc.raw_normals
             colors = pc.raw_colors
-            size = 4 * (len(vertices) + len(normals) + len(colors))
-            f.write(struct.pack('=4sL', b'ARGH', size))
             def records():
-                v = iter(vertices)
-                n = iter(normals)
-                c = iter(colors)
+                v_it = iter(vertices)
+                n_it = iter(normals)
+                c_it = iter(colors)
                 while True:
-                    r = list(islice(v, 3)) + list(islice(n, 3)) + list(islice(c, 4))
-                    if r:
-                        yield r
+                    v_xyz = list(islice(v_it, 3))
+                    n_xyz = list(islice(n_it, 3))
+                    c_rgb = [to_uint8(f) for f in list(islice(c_it, 4))][:3]
+                    if v_xyz and c_rgb:
+                        print(f"v: {v_xyz}, c: {c_rgb}")
+                        yield v_xyz + c_rgb
                     else:
                         break
             for r in records():
-                f.write(struct.pack('=3f3f4f', *r))
+                f.write(*r)
 
         return {'FINISHED'}
 
@@ -197,7 +193,7 @@ class AGNOSIA_PT_pointcloud(Panel):
         box.prop(pc, 'target')
         box.prop(pc, 'point_count')
         box.prop(pc, 'seed')
-        layout.operator('object.export_pointcloud', text="Export .cloud")
+        layout.operator('object.export_pointcloud', text="Export .bin")
 
 
 #---------------------------------------------------------------------------#
@@ -682,6 +678,59 @@ def raycast_to_exterior(bvh, pt):
         return NO_HIT
 
     return (location, normal, index, distance)
+
+
+#---------------------------------------------------------------------------#
+# Pointcloud file types
+
+## Structures in binary pointcloud file
+
+def bin_size(size):
+    return struct.pack('=L', size)
+
+def bin_point(x, y, z, r, g, b):
+    return struct.pack('=fffBBBx', x, y, z, r, g, b)
+
+
+## Binary pointcloud writing
+
+class PointcloudBinWriter:
+    # File format:
+    #     uint32_t size_of_data
+    #     struct record {
+    #         float x, y, z;
+    #         uint8_t r, g, b;
+    #         uint8_t pad;
+    #     } records[size / sizeof(struct record)]
+
+    def __init__(self, filename):
+        self.filename = filename
+        self.file = None
+        self.count = 0
+        self.size = 0
+
+    def write(self, x, y, z, r, g, b):
+        assert (self.file is not None), "File is not open."
+        blob = bin_point(x, y, z, r, g, b)
+        self.file.write(blob)
+        self.size += len(blob)
+        self.count += 1
+
+    def __len__(self):
+        return self.count
+
+    def __enter__(self):
+        self.file = open(self.filename, 'wb')
+        # The file starts with the size of its data. We write a zero
+        # initially, and fill in the actual size on __exit__().
+        self.file.write(bin_size(0))
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if not exc_type and not exc_value:
+            self.file.seek(0)
+            self.file.write(bin_size(self.size))
+        self.file.close()
 
 
 #---------------------------------------------------------------------------#
