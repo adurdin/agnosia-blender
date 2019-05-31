@@ -18,7 +18,7 @@ from mathutils.bvhtree import BVHTree
 class AgnosiaCreatePointcloudOperator(Operator):
     bl_idname = "object.create_pointcloud"
     bl_label = "Create pointcloud"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'REGISTER'}
 
     def execute(self, context):
         if context.mode != "OBJECT":
@@ -522,33 +522,25 @@ def volume_sample_obj(o, count, rng):
     vertices = []
     normals = []
     colors = []
-    # FIXME: Should this be FromMesh(o.data) instead??
-    #        Why FromObject, does it include children? if so, nice.
-    bvh = BVHTree.FromObject(o, bpy.context.depsgraph)
-    # bm = bmesh.new()
-    # bm.from_mesh(o.data)
-    # bvh = BVHTree.FromBMesh(bm)
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bvh = BVHTree.FromBMesh(bm)
 
     halfwidth = object_bounding_halfwidth(o) + 0.1
     it = iter(cube_volume_points(halfwidth, rng))
     while len(vertices) < count:
         pt = next(it)
 
-        # Two raycasts reduce the number of erroneous points.
-        hit0 = raycast_to_exterior(bvh, pt, Vector((1, 0, 0)))
-        # hit1 = raycast_to_exterior(bvh, pt, Vector((0, 1, 0)))
-        # pt_is_inside = (hit0[0] is not None and hit1[0] is not None)
-        pt_is_inside = hit0[0] is not None
+        (location, normal, index, distance) = raycast_to_exterior(bvh, pt)
+        pt_is_inside = (location is not None)
 
         if pt_is_inside:
-            surface_pt = hit0[0]
-            surface_normal = hit0[1]
-            vertices.append(pt)
-            normals.append(surface_normal)
+            vertices.append(location)
+            normals.append(normal)
             # TEMP: color each point by its coordinates
-            r = (abs(pt[0]) / halfwidth)
-            g = (abs(pt[1]) / halfwidth)
-            b = (abs(pt[2]) / halfwidth)
+            r = (abs(location[0]) / halfwidth)
+            g = (abs(location[1]) / halfwidth)
+            b = (abs(location[2]) / halfwidth)
             colors.append((r, g, b, 1.0))
     return (vertices, normals, colors)
 
@@ -598,14 +590,10 @@ def raycast_to_origin(o, pt):
     direction = (origin - pt).normalized()
     return o.ray_cast(pt, direction)
 
-def raycast_to_exterior(bvh, pt, direction):
+def raycast_to_exterior(bvh, pt):
     """Raycast the BVHTree bvh from pt to the object's exterior.
     If pt is on the object's interior, return (location, normal, index, distance);
-    if it's on the exterior, return (None, None, None, None).
-
-    Because Blender's raycast only reports the first hit, this can sometimes
-    return false positives. Do two different raycasts in two perpendicular
-    directions if you need more certainty."""
+    if it's on the exterior, return (None, None, None, None)."""
 
     NO_HIT = (None, None, None, None)
 
