@@ -18,7 +18,7 @@ else:
 
 import bpy
 from bpy.props import CollectionProperty
-from bpy.types import Object, Panel, PropertyGroup
+from bpy.types import Panel
 
 from .pointcloud import PointcloudProperty
 
@@ -77,7 +77,7 @@ def register():
     bpy.utils.register_class(pointcloud.PointcloudProperty)
 
     # FIXME: should maybe be on Mesh, since I can't sample cameras and shit.
-    Object.pointclouds = CollectionProperty(type=pointcloud.PointcloudProperty)
+    bpy.types.Object.pointclouds = CollectionProperty(type=pointcloud.PointcloudProperty)
 
     # Done.
     print("agnosia_tools: registered.");
@@ -85,7 +85,7 @@ def register():
 
 def unregister():
     # Remove property groups
-    del Object.pointclouds
+    del bpy.types.Object.pointclouds
     bpy.utils.unregister_class(pointcloud.PointcloudProperty)
 
     # Remove menus

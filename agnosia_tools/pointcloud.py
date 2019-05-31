@@ -292,7 +292,7 @@ def assign_material(o, mat):
 
 def create_pointcloud_from(context, target):
     o = create_empty_mesh_obj(context, 'Pointcloud')
-    pc = o.pointclouds[0]
+    pc = o.pointclouds.add()
     pc.target = target
     pc.seed = random.randint(-2**31, 2**31)
     return o
@@ -302,7 +302,6 @@ def create_empty_mesh_obj(context, name):
     o = bpy.data.objects.new(name, mesh)
     o.show_name = True
     context.scene.collection.objects.link(o)
-    o.pointclouds.add()
     return o
 
 def update_pointcloud_iter(o):
