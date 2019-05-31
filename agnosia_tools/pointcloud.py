@@ -142,6 +142,11 @@ class AGNOSIA_PT_pointcloud(Panel):
         box.prop(pc, 'point_count')
         box.prop(pc, 'seed')
 
+        print(":: Raw data in this pointcloud:")
+        print(f"::    {len(pc.raw_vertices or ())} floats for vertices")
+        print(f"::    {len(pc.raw_normals or ())} floats for normals")
+        print(f"::    {len(pc.raw_colors or ())} floats for colors")
+
 
 #---------------------------------------------------------------------------#
 # Pointcloud property and data
@@ -161,23 +166,35 @@ class PointcloudProperty(PropertyGroup):
     @staticmethod
     def _pack_array(a):
         if a:
+            print(f"  pack:")
+            print(f"     {len(a)} array members,")
             b = a.tobytes()
+            print(f"     {len(b)} bytes,")
             c = zlib.compress(b)
+            print(f"     {len(c)} compressed bytes,")
             d = base64.encodebytes(c)
+            print(f"     {len(d)} base64 bytes.")
             return d.decode('ascii')
         else:
+            print(f"  pack: empty.")
             return ""
 
     @staticmethod
     def _unpack_array(s, typecode):
         if s:
+            print(f"  unpack:")
             a = array(typecode)
             b = bytes(s, 'ascii')
+            print(f"     {len(b)} base64 bytes,")
             c = base64.decodebytes(b)
+            print(f"     {len(c)} compressed bytes,")
             d = zlib.decompress(c)
+            print(f"     {len(d)} bytes,")
             a.frombytes(d)
+            print(f"     {len(a)} array members.")
             return a
         else:
+            print(f"  unpack: empty.")
             return array(typecode)
 
     @property
@@ -193,6 +210,7 @@ class PointcloudProperty(PropertyGroup):
         if self.raw_vertices_string:
             value = self.raw_cache.get('vertices')
             if value is None:
+                print("> Caching vertices array")
                 value = self._unpack_array(self.raw_vertices_string, 'f')
                 self.raw_cache['vertices'] = value
             return value
@@ -204,6 +222,7 @@ class PointcloudProperty(PropertyGroup):
         if self.raw_normals_string:
             value = self.raw_cache.get('normals')
             if value is None:
+                print("> Caching normals array")
                 value = self._unpack_array(self.raw_normals_string, 'f')
                 self.raw_cache['normals'] = value
             return value
@@ -215,6 +234,7 @@ class PointcloudProperty(PropertyGroup):
         if self.raw_colors_string:
             value = self.raw_cache.get('colors')
             if value is None:
+                print("> Caching colors array")
                 value = self._unpack_array(self.raw_colors_string, 'f')
                 self.raw_cache['colors'] = value
             return value
@@ -238,11 +258,13 @@ class PointcloudProperty(PropertyGroup):
             if len(colors) != 4 * vertex_count:
                 raise ValueError("len(colors) must be 4 * vertex_count")
 
+        print(">> Updating all string properties")
         self.raw_vertices_string = self._pack_array(vertices)
         self.raw_normals_string = self._pack_array(normals)
         self.raw_colors_string = self._pack_array(colors)
 
         # Cached
+        print(">> Caching all arrays")
         self.raw_cache['vertices'] = vertices
         self.raw_cache['normals'] = normals
         self.raw_cache['colors'] = colors
