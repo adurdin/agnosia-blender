@@ -204,7 +204,7 @@ def _pointcloud_property_update(self, context):
 
 class PointcloudProperty(PropertyGroup):
     target : PointerProperty(name="Sample", type=Object, update=_pointcloud_property_update)
-    point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=_pointcloud_property_update)
+    point_count : IntProperty(name="Point count", default=1024, min=128, step=64, update=_pointcloud_property_update)
     seed : IntProperty(name="Seed", default=0, update=_pointcloud_property_update)
     raw_vertices_string : StringProperty(name="_RawVerticesString", default="")
     raw_normals_string : StringProperty(name="_RawNormalsString", default="")
