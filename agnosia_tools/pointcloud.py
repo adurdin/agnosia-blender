@@ -1,10 +1,13 @@
 import bpy
 import bmesh
+import base64
 import math
 import mathutils
 import random
+import zlib
 
-from bpy.props import IntProperty, PointerProperty
+from array import array
+from bpy.props import IntProperty, PointerProperty, StringProperty
 from bpy.types import Object, Operator, Panel, PropertyGroup
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
@@ -141,7 +144,7 @@ class AGNOSIA_PT_pointcloud(Panel):
 
 
 #---------------------------------------------------------------------------#
-# Properties
+# Pointcloud property and data
 
 def _pointcloud_property_update(self, context):
     bpy.ops.object.update_pointcloud()
@@ -150,6 +153,99 @@ class PointcloudProperty(PropertyGroup):
     target : PointerProperty(name="Sample", type=Object, update=_pointcloud_property_update)
     point_count : IntProperty(name="Point count", default=1024, min=128, max=65536, step=64, update=_pointcloud_property_update)
     seed : IntProperty(name="Seed", default=0, update=_pointcloud_property_update)
+    raw_vertices_string : StringProperty(name="_RawVerticesString", default="")
+    raw_normals_string : StringProperty(name="_RawNormalsString", default="")
+    raw_colors_string : StringProperty(name="_RawColorsString", default="")
+    _raw_cache = None
+
+    @staticmethod
+    def _pack_array(a):
+        if a:
+            b = a.tobytes()
+            c = zlib.compress(b)
+            d = base64.encodebytes(c)
+            return d.decode('ascii')
+        else:
+            return ""
+
+    @staticmethod
+    def _unpack_array(s, typecode):
+        if s:
+            a = array(typecode)
+            b = bytes(s, 'ascii')
+            c = base64.decodebytes(b)
+            d = zlib.decompress(c)
+            a.frombytes(d)
+            return a
+        else:
+            return array(typecode)
+
+    @property
+    def raw_cache(self):
+        cache = self.__dict__.get('_raw_cache')
+        if cache is None:
+            cache = {}
+            self.__dict__['_raw_cache'] = cache
+        return cache
+
+    @property
+    def raw_vertices(self):
+        if self.raw_vertices_string:
+            value = self.raw_cache.get('vertices')
+            if value is None:
+                value = self._unpack_array(self.raw_vertices_string, 'f')
+                self.raw_cache['vertices'] = value
+            return value
+        else:
+            return array('f')
+
+    @property
+    def raw_normals(self):
+        if self.raw_normals_string:
+            value = self.raw_cache.get('normals')
+            if value is None:
+                value = self._unpack_array(self.raw_normals_string, 'f')
+                self.raw_cache['normals'] = value
+            return value
+        else:
+            return array('f')
+
+    @property
+    def raw_colors(self):
+        if self.raw_colors_string:
+            value = self.raw_cache.get('colors')
+            if value is None:
+                value = self._unpack_array(self.raw_colors_string, 'f')
+                self.raw_cache['colors'] = value
+            return value
+        else:
+            return array('f')
+
+    def set_raw_data(self, vertices, normals=None, colors=None):
+        if (not isinstance(vertices, array)) or (vertices.typecode != 'f'):
+            raise ValueError("vertices must be type array('f')")
+        if len(vertices) % 3 != 0:
+            raise ValueError("vertices length must be multiple of 3")
+        vertex_count = len(vertices) // 3
+        if (normals is not None):
+            if (not isinstance(normals, array)) or (normals.typecode != 'f'):
+                raise ValueError("normals must be type array('f')")
+            if len(normals) != (3 * vertex_count):
+                raise ValueError("len(normals) must be 3 * vertex_count")
+        if (colors is not None):
+            if (not isinstance(colors, array)) or (colors.typecode != 'f'):
+                raise ValueError("colors must be type array('f')")
+            if len(colors) != 4 * vertex_count:
+                raise ValueError("len(colors) must be 4 * vertex_count")
+
+        self.raw_vertices_string = self._pack_array(vertices)
+        self.raw_normals_string = self._pack_array(normals)
+        self.raw_colors_string = self._pack_array(colors)
+
+        # Cached
+        self.raw_cache['vertices'] = vertices
+        self.raw_cache['normals'] = normals
+        self.raw_cache['colors'] = colors
 
 
 #---------------------------------------------------------------------------#
@@ -315,6 +411,12 @@ def update_pointcloud_iter(o):
     rng = random.Random(seed)
     for data in generate_points(pc.target, pc.point_count, rng, step_count=4096):
         yield
+
+    vertices_arr = array('f', (f for vec in data[0] for f in vec))
+    normals_arr = array('f', (f for vec in data[1] for f in vec))
+    colors_arr = array('f', (f for vec in data[2] for f in vec))
+    pc.set_raw_data(vertices_arr, normals=normals_arr, colors=colors_arr)
+
     o.data = create_pointcloud_mesh(o.data.name, data)
     assign_material(o, get_pointcloud_material())
 
