@@ -152,7 +152,6 @@ class AgnosiaPointcloudExportOperator(Operator):
                     n_xyz = list(islice(n_it, 3))
                     c_rgb = [to_uint8(f) for f in list(islice(c_it, 4))][:3]
                     if v_xyz and c_rgb:
-                        print(f"v: {v_xyz}, c: {c_rgb}")
                         yield v_xyz + c_rgb
                     else:
                         break
