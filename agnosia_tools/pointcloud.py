@@ -478,9 +478,10 @@ def generate_points(target, count, rng=random, step_count=0):
     total_count = 0
     total_data = [[], [], []]
     while total_count < count:
-        # data = sphere_sample_obj(pc.target, pc.point_count, rng)
         step_count = min(step_count, (count - total_count))
-        data = volume_sample_obj(target, step_count, rng)
+        # data = sphere_sample_obj(target, step_count, rng)
+        # data = volume_sample_obj(target, step_count, rng)
+        data = surface_sample_obj(target, step_count, rng)
         for i in range(len(total_data)):
             total_data[i] += data[i]
         total_count += step_count
@@ -597,6 +598,49 @@ def volume_sample_obj(o, count, rng):
             colors.append((r, g, b, 1.0))
     return (vertices, normals, colors)
 
+def surface_sample_obj(o, count, rng):
+    # Sample the object by generating points on the surfaces of its tris.
+    vertices = []
+    normals = []
+    colors = []
+
+    mesh = o.data
+    # Find the surface area of each poly and the whole mesh.
+    poly_areas = [p.area for p in mesh.polygons]
+    surface_area = sum(poly_areas)
+
+    # Generate uniform random area targets.
+    area_targets = sorted(rng.uniform(0, surface_area) for _ in range(count))
+
+    # Iterate the polys to see which reaches the target.
+    area_so_far = 0
+    target = area_targets.pop(0)
+    for i, poly in enumerate(mesh.polygons):
+        area_so_far += poly_areas[i]
+        while target <= area_so_far:
+            # Spawn a point.
+            poly_vertices = [Vector(mesh.vertices[j].co) for j in poly.vertices]
+            location = polygon_surface_point(poly_vertices, rng)
+            normal = poly.normal
+            # Save the point.
+            vertices.append(location)
+            normals.append(normal)
+            # TEMP: color each point by its coordinates
+            halfwidth = object_bounding_halfwidth(o) + 0.1
+            r = (abs(location[0]) / halfwidth)
+            g = (abs(location[1]) / halfwidth)
+            b = (abs(location[2]) / halfwidth)
+            colors.append((r, g, b, 1.0))
+            # Get a new target
+            if area_targets:
+                target = area_targets.pop(0)
+            else:
+                # If we've run out of targets, then we have enough points.
+                break
+    if not vertices:
+        print(f"ERROR: didn't generate any vertices!")
+    return (vertices, normals, colors)
+
 def object_bounding_radius(o):
     from math import sqrt
     radius = 0.0
@@ -635,6 +679,43 @@ def cube_volume_points(halfwidth, rng):
         y = halfwidth * v
         z = halfwidth * w
         yield Vector((x, y, z))
+
+def polygon_surface_point(vertices, rng):
+    # Return a random point on the surface of the polygon.
+    # Determine the vertices abc of each triangle, and the vectors ab and ac.
+    tris = [
+        (
+            vertices[0],    # a
+            vertices[i+1],  # b
+            vertices[i+2],  # c
+            (vertices[i+1] - vertices[0]),  # ab
+            (vertices[i+2] - vertices[0]),  # ac
+        )
+        for i in range(len(vertices) - 2)
+    ]
+    # Find the area of each tri and the total polygon area.
+    tri_areas = [
+        (ab.cross(ac)).length / 2.0
+        for (_, _, _, ab, ac) in tris
+    ]
+    surface_area = sum(tri_areas)
+    # Pick a target tri by area
+    target = rng.uniform(0, surface_area)
+    area_so_far = 0
+    for (i, (a, b, c, ab, ac)) in enumerate(tris):
+        area_so_far += tri_areas[i]
+        while target <= area_so_far:
+            # Pick a point in this tri
+            r1 = rng.random()
+            r2 = rng.random()
+            r1root = math.sqrt(r1)
+            pt = ((1 - r1root) * a
+                + r1root * (1 - r2) * b
+                + r1root * r2 * c)
+            return pt
+    # Shouldn't get here, but if we do, just return a vertex
+    print("ERROR: failed to find target tri.")
+    return vertices[0]
 
 def raycast_to_origin(o, pt):
     # Raycast the object o from pt (in object space) to its origin.
