@@ -9,9 +9,11 @@ bl_info = {
 
 if "bpy" in locals():
     import importlib as imp
+    imp.reload(dungeon)
     imp.reload(pointcloud)
     print("agnosia_tools: reloaded.");
 else:
+    from . import dungeon
     from . import pointcloud
     print("agnosia_tools: loaded.");
 
@@ -63,6 +65,7 @@ def register():
     bpy.utils.register_class(pointcloud.AgnosiaCreatePointcloudOperator)
     bpy.utils.register_class(pointcloud.AgnosiaUpdatePointcloudOperator)
     bpy.utils.register_class(pointcloud.AgnosiaPointcloudExportOperator)
+    bpy.utils.register_class(dungeon.ToolsOperator)
 
     # Add panels
     bpy.utils.register_class(TOOLS_PT_agnosia_create)
@@ -75,9 +78,10 @@ def register():
     bpy.types.VIEW3D_MT_object.append(menu_create_pointcloud)
 
     # Add property groups
+    bpy.utils.register_class(dungeon.CorridorProperty)
+    bpy.types.Object.dungeon_corridors = CollectionProperty(type=dungeon.CorridorProperty)
     bpy.utils.register_class(pointcloud.PointcloudProperty)
-
-    # FIXME: should maybe be on Mesh, since I can't sample cameras and shit.
+    # FIXME: Object.pointclouds should maybe be on Mesh instead, since I can't sample cameras and shit.
     bpy.types.Object.pointclouds = CollectionProperty(type=pointcloud.PointcloudProperty)
 
     # Done.
@@ -88,6 +92,8 @@ def unregister():
     # Remove property groups
     del bpy.types.Object.pointclouds
     bpy.utils.unregister_class(pointcloud.PointcloudProperty)
+    del bpy.types.Object.dungeon_corridors
+    bpy.utils.unregister_class(dungeon.CorridorProperty)
 
     # Remove menus
     bpy.types.VIEW3D_MT_object.remove(menu_create_pointcloud)
@@ -97,6 +103,7 @@ def unregister():
     bpy.utils.unregister_class(TOOLS_PT_agnosia_create)
 
     # Remove operators
+    bpy.utils.unregister_class(dungeon.ToolsOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaPointcloudExportOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaUpdatePointcloudOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaCreatePointcloudOperator)
