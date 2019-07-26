@@ -56,3 +56,40 @@ class CorridorProperty(PropertyGroup):
     pass
 
 # bpy.ops.agnosia.dungeon_tools('INVOKE_DEFAULT')
+
+
+class AddCorridorOperator(Operator):
+    """bpy.ops.agnosia.dungeon_add_corridor"""
+    bl_idname = "agnosia.dungeon_add_corridor"
+    bl_label = "Create corridor"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # @classmethod
+    # def poll(self, context):
+    #     # TODO: do we actually need to limit this to object mode?
+    #     return (context.mode == "OBJECT")
+
+    def execute(self, context):
+        # if context.mode != "OBJECT":
+        #     self.report({'WARNING'}, "Create corridor: must be in Object mode.")
+        #     return {'CANCELLED'}
+
+        # Create a poly spline.
+        bpy.ops.curve.primitive_bezier_curve_add(radius=0, view_align=False, enter_editmode=True, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0))
+        bpy.ops.curve.spline_type_set(type='POLY', use_handles=False)
+
+        # The spline starts with 2 points; move them apart to begin with.
+        o = context.object
+        curve = o.data
+        spline = curve.splines[0]
+        spline.points[0].co = Vector((0.0, 0.0, 0.0, 1.0))
+        spline.points[1].co = Vector((10.0, 0.0, 0.0, 1.0))
+
+        # FIXME: Make it a corridor.
+        corridor = o.dungeon_corridors.add()
+
+        ## FIXME: Activate the dungeon tools
+        ## BUG: right now this swallows all input until it ends D:
+        #bpy.ops.agnosia.dungeon_tools('INVOKE_DEFAULT')
+
+        return {'FINISHED'}
