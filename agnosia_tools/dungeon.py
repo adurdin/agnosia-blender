@@ -74,19 +74,33 @@ class AddCorridorOperator(Operator):
         #     self.report({'WARNING'}, "Create corridor: must be in Object mode.")
         #     return {'CANCELLED'}
 
-        # Create a poly spline.
-        bpy.ops.curve.primitive_bezier_curve_add(radius=0, view_align=False, enter_editmode=True, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0))
-        bpy.ops.curve.spline_type_set(type='POLY', use_handles=False)
+        name = 'Corridor'
 
-        # The spline starts with 2 points; move them apart to begin with.
-        o = context.object
-        curve = o.data
-        spline = curve.splines[0]
+        # Create a poly spline with two points.
+        curve = bpy.data.curves.new(name=(name + '_curve'), type='CURVE')
+        curve.dimensions = '3D'
+        spline = curve.splines.new(type='POLY')
+        needed_point_count = (2 - len(spline.points))
+        if needed_point_count > 0:
+            spline.points.add(count=needed_point_count)
         spline.points[0].co = Vector((0.0, 0.0, 0.0, 1.0))
         spline.points[1].co = Vector((10.0, 0.0, 0.0, 1.0))
 
-        # FIXME: Make it a corridor.
+        # Create an object to hold the spline.
+        o = bpy.data.objects.new(name, curve)
+
+        # Make it a corridor.
         corridor = o.dungeon_corridors.add()
+
+        # FIXME: set corridor properties
+        # FIXME: derive a mesh from the corridor curve??
+
+        # Add the object to the scene, make it active, and select it.
+        context.scene.collection.objects.link(o)
+        context.view_layer.objects.active = o
+        o.select_set(True)
+
+        # FIXME: enter edit mode?
 
         ## FIXME: Activate the dungeon tools
         ## BUG: right now this swallows all input until it ends D:
