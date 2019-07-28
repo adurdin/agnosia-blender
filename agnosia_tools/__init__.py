@@ -67,10 +67,12 @@ def register():
     bpy.utils.register_class(pointcloud.AgnosiaPointcloudExportOperator)
     bpy.utils.register_class(dungeon.ToolsOperator)
     bpy.utils.register_class(dungeon.AddCorridorOperator)
+    bpy.utils.register_class(dungeon.BuildCorridorMeshOperator)
 
     # Add panels
     bpy.utils.register_class(TOOLS_PT_agnosia_create)
     bpy.utils.register_class(pointcloud.AGNOSIA_PT_pointcloud)
+    bpy.utils.register_class(dungeon.AGNOSIA_PT_dungeon_corridor)
 
     # Add menus
     # FIXME: this shouldn't just be slapped on the end of the menu like this!
@@ -100,10 +102,12 @@ def unregister():
     bpy.types.VIEW3D_MT_object.remove(menu_create_pointcloud)
 
     # Remove panels
+    bpy.utils.unregister_class(dungeon.AGNOSIA_PT_dungeon_corridor)
     bpy.utils.unregister_class(pointcloud.AGNOSIA_PT_pointcloud)
     bpy.utils.unregister_class(TOOLS_PT_agnosia_create)
 
     # Remove operators
+    bpy.utils.unregister_class(dungeon.BuildCorridorMeshOperator)
     bpy.utils.unregister_class(dungeon.AddCorridorOperator)
     bpy.utils.unregister_class(dungeon.ToolsOperator)
     bpy.utils.unregister_class(pointcloud.AgnosiaPointcloudExportOperator)

@@ -1,7 +1,7 @@
 import bpy
 import mathutils
 
-from bpy.types import Object, Operator, PropertyGroup
+from bpy.types import Object, Operator, Panel, PropertyGroup
 from mathutils import Vector
 
 class ToolsOperator(Operator):
@@ -65,7 +65,7 @@ class AddCorridorOperator(Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # @classmethod
-    # def poll(self, context):
+    # def poll(cls, context):
     #     # TODO: do we actually need to limit this to object mode?
     #     return (context.mode == "OBJECT")
 
@@ -107,3 +107,50 @@ class AddCorridorOperator(Operator):
         #bpy.ops.agnosia.dungeon_tools('INVOKE_DEFAULT')
 
         return {'FINISHED'}
+
+class BuildCorridorMeshOperator(Operator):
+    """bpy.ops.agnosia.dungeon_build_corridor_mesh"""
+    bl_idname = "agnosia.dungeon_build_corridor_mesh"
+    bl_label = "Build corridor mesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        o = context.object
+        if context.mode != "OBJECT": return False
+        if o is None: return False
+        if not o.select_get(): return False
+        if not o.dungeon_corridors: return False
+        return True
+
+    def execute(self, context):
+        print("FIXME: make a mesh here, somehow")
+
+        return {'FINISHED'}
+
+
+#---------------------------------------------------------------------------#
+# Panels
+
+class AGNOSIA_PT_dungeon_corridor(Panel):
+    bl_label = "Corridor"
+    bl_idname = "AGNOSIA_PT_dungeon_corridor"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Agnosia"
+    bl_context = "objectmode"
+
+    @classmethod
+    def poll(cls, context):
+        o = context.object
+        if context.mode != "OBJECT": return False
+        if o is None: return False
+        if not o.select_get(): return False
+        if not o.dungeon_corridors: return False
+        return True
+
+    def draw(self, context):
+        o = context.object
+
+        layout = self.layout
+        layout.operator('agnosia.dungeon_build_corridor_mesh', text="Build mesh")
