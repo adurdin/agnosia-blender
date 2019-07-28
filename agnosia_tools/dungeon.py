@@ -1,6 +1,8 @@
 import bpy
+import bmesh
 import mathutils
 
+from bpy.props import PointerProperty
 from bpy.types import Object, Operator, Panel, PropertyGroup
 from mathutils import Vector
 
@@ -53,7 +55,7 @@ class ToolsOperator(Operator):
         return (context.active_object is not None)
 
 class CorridorProperty(PropertyGroup):
-    pass
+    built_mesh : PointerProperty(name="Built mesh", type=Object) #FIXME: update=_update_callback to check for a valid object if changed
 
 # bpy.ops.agnosia.dungeon_tools('INVOKE_DEFAULT')
 
@@ -96,6 +98,7 @@ class AddCorridorOperator(Operator):
         # FIXME: derive a mesh from the corridor curve??
 
         # Add the object to the scene, make it active, and select it.
+        # FIXME: should this be view_layer.active_layer_collection.collection.objects.link(o)?
         context.scene.collection.objects.link(o)
         context.view_layer.objects.active = o
         o.select_set(True)
@@ -124,7 +127,27 @@ class BuildCorridorMeshOperator(Operator):
         return True
 
     def execute(self, context):
-        print("FIXME: make a mesh here, somehow")
+        corridor_object = context.object
+        # FIXME: cut of any .001 or whatever nonsense, before appending 'Mesh'
+        base_name = corridor_object.name
+        corridor = corridor_object.dungeon_corridors[0]
+
+        # Add a mesh object if there is none
+        if corridor.built_mesh is None:
+            mesh = bpy.data.meshes.new(base_name + 'Mesh')
+            o = bpy.data.objects.new(base_name + 'BuiltMesh', mesh)
+            context.scene.collection.objects.link(o)
+            o.hide_select = True
+            o.parent = corridor_object
+            corridor.built_mesh = o
+
+        # Now build the mesh
+        mesh = corridor.built_mesh.data
+        bm = bmesh.new()
+        # bm.from_mesh(mesh)
+        bmesh.ops.create_monkey(bm) #, matrix=mathutils.Matrix.Identity(4), calc_uvs=True)
+        bm.to_mesh(mesh)
+        bm.free()
 
         return {'FINISHED'}
 
